@@ -81,6 +81,17 @@ export default function App() {
   // 部品情報取得中
   const [fetchingPart, setFetchingPart] = useState(false)
 
+  // 棚卸しモード
+  const [stocktakeMode, setStocktakeMode] = useState(false)
+  const [confirmedIds, setConfirmedIds] = useState(new Set())
+  const [stocktakeLocFilter, setStocktakeLocFilter] = useState('')
+  const [showStocktakeSearch, setShowStocktakeSearch] = useState(false)
+  const [stocktakeSearchQuery, setStocktakeSearchQuery] = useState('')
+  const [scanHistory, setScanHistory] = useState([])
+  const [stocktakeScanning, setStocktakeScanning] = useState(false)
+  const [lastScanResult, setLastScanResult] = useState(null)
+  const lastScanTimerRef = useRef(null)
+
   const fetchAll = useCallback(async () => {
     setLoading(true)
     const [{ data: itemsData }, { data: catsData }, { data: locsData }] = await Promise.all([
@@ -378,6 +389,75 @@ export default function App() {
     } catch { return '?' }
   }
 
+  // ===== 棚卸し機能 =====
+  const startStocktake = () => {
+    setStocktakeMode(true)
+    setConfirmedIds(new Set())
+    setScanHistory([])
+    setStocktakeLocFilter('')
+    setStocktakeSearchQuery('')
+    setShowStocktakeSearch(false)
+    setLastScanResult(null)
+  }
+
+  const endStocktake = () => {
+    if (confirmedIds.size > 0 && !confirm('棚卸しを終了しますか？進捗は失われます。')) return
+    setStocktakeMode(false)
+    setConfirmedIds(new Set())
+    setScanHistory([])
+    setStocktakeScanning(false)
+    setLastScanResult(null)
+  }
+
+  const confirmItem = (itemId) => {
+    setConfirmedIds(prev => { const s = new Set(prev); s.add(itemId); return s })
+  }
+
+  const confirmItemWithFeedback = (item) => {
+    confirmItem(item.id)
+    setScanHistory(prev => [item, ...prev.filter(h => h.id !== item.id)].slice(0, 5))
+    if (navigator.vibrate) navigator.vibrate(200)
+  }
+
+  const handleStocktakeScan = useCallback((code) => {
+    // バーコードまたはURLで一致するアイテムを検索
+    const codeLower = (code || '').toLowerCase()
+    const matched = items.filter(i =>
+      (i.bc && i.bc.toLowerCase() === codeLower) ||
+      (i.bc && codeLower.includes(i.bc.toLowerCase())) ||
+      (i.bc && i.bc.toLowerCase().includes(codeLower))
+    )
+
+    if (matched.length > 0) {
+      // 一致した全アイテムを確認済みに
+      matched.forEach(i => confirmItem(i.id))
+      const first = matched[0]
+      setScanHistory(prev => [first, ...prev.filter(h => h.id !== first.id)].slice(0, 5))
+      if (navigator.vibrate) navigator.vibrate(200)
+      setLastScanResult({ ok: true, name: first.name, count: matched.length, image_url: first.image_url })
+    } else {
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+      setLastScanResult({ ok: false, code: code.length > 40 ? code.slice(0, 40) + '...' : code })
+    }
+
+    // 2秒後にトースト消去
+    if (lastScanTimerRef.current) clearTimeout(lastScanTimerRef.current)
+    lastScanTimerRef.current = setTimeout(() => setLastScanResult(null), 2500)
+  }, [items])
+
+  const stocktakeSearchResults = stocktakeSearchQuery.length >= 1
+    ? items.filter(i => {
+        const q = stocktakeSearchQuery.toLowerCase()
+        return (i.name || '').toLowerCase().includes(q) || (i.bc || '').toLowerCase().includes(q)
+      }).slice(0, 30)
+    : []
+
+  const unconfirmedItems = stocktakeMode
+    ? items.filter(i => !confirmedIds.has(i.id) && (!stocktakeLocFilter || i.loc === stocktakeLocFilter))
+    : []
+
+  const stocktakePercent = items.length > 0 ? Math.round((confirmedIds.size / items.length) * 100) : 0
+
   if (loading) return <div className="loading">読み込み中...</div>
 
   return (
@@ -385,12 +465,181 @@ export default function App() {
     <div className="app">
       <div className="topbar">
         <h1>在庫管理</h1>
-        <button className="btn" onClick={() => setShowMasterInline(!showMasterInline)}>
-          {showMasterInline ? '✕ マスター閉じる' : '⚙ マスター管理'}
-        </button>
-        <button className="btn" onClick={exportCSV}>CSV出力</button>
-        <button className="btn primary" onClick={openAdd}>+ 新規登録</button>
+        {stocktakeMode ? (
+          <button className="btn stocktake-end" onClick={endStocktake}>✕ 棚卸し終了</button>
+        ) : (
+          <>
+            <button className="btn stocktake-btn" onClick={startStocktake}>📋 棚卸し</button>
+            <button className="btn" onClick={() => setShowMasterInline(!showMasterInline)}>
+              {showMasterInline ? '✕ マスター閉じる' : '⚙ マスター管理'}
+            </button>
+            <button className="btn" onClick={exportCSV}>CSV出力</button>
+            <button className="btn primary" onClick={openAdd}>+ 新規登録</button>
+          </>
+        )}
       </div>
+
+      {stocktakeMode ? (
+        /* ===== 棚卸しモード ===== */
+        <div className="stocktake-view">
+          {/* 進捗 */}
+          <div className="stocktake-progress-wrap">
+            <div className="stocktake-progress-bar">
+              <div className="stocktake-progress-fill" style={{ width: stocktakePercent + '%' }} />
+            </div>
+            <div className="stocktake-progress-text">
+              <span className="stocktake-count">{confirmedIds.size}</span>
+              <span className="stocktake-sep"> / </span>
+              <span>{items.length} 確認済み</span>
+              <span className="stocktake-pct">{stocktakePercent}%</span>
+            </div>
+          </div>
+
+          {/* アクションボタン */}
+          <div className="stocktake-actions">
+            <button className="btn primary stocktake-scan-btn" onClick={() => setStocktakeScanning(true)}>📷 スキャン</button>
+            <button className="btn stocktake-manual-btn" onClick={() => { setShowStocktakeSearch(true); setStocktakeSearchQuery('') }}>🔍 手動検索</button>
+          </div>
+
+          {/* スキャン結果トースト */}
+          {lastScanResult && (
+            <div className={'scan-toast' + (lastScanResult.ok ? ' ok' : ' ng')}>
+              {lastScanResult.ok ? (
+                <div className="scan-toast-inner">
+                  {lastScanResult.image_url && <img src={lastScanResult.image_url} alt="" className="scan-toast-img" />}
+                  <div>
+                    <div className="scan-toast-title">✓ {lastScanResult.name}</div>
+                    <div className="scan-toast-sub">{lastScanResult.count}点を確認済みにしました</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="scan-toast-inner">
+                  <div>
+                    <div className="scan-toast-title">✗ 該当なし</div>
+                    <div className="scan-toast-sub">{lastScanResult.code}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* スキャン履歴 */}
+          {scanHistory.length > 0 && (
+            <div className="scan-history">
+              <div className="scan-history-title">スキャン履歴</div>
+              <div className="scan-history-list">
+                {scanHistory.map((h, idx) => (
+                  <div key={h.id + '-' + idx} className="scan-history-item">
+                    {h.image_url && <img src={h.image_url} alt="" className="scan-history-thumb" onError={e => { e.target.style.display = 'none' }} />}
+                    <span className="scan-history-name">{h.name || '—'}</span>
+                    <span className="scan-history-check">✓</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ロケーションフィルタ */}
+          <div className="stocktake-filter">
+            <select value={stocktakeLocFilter} onChange={e => setStocktakeLocFilter(e.target.value)}>
+              <option value="">全ロケーション ({unconfirmedItems.length}件未確認)</option>
+              {locations.map(l => {
+                const cnt = items.filter(i => !confirmedIds.has(i.id) && i.loc === l).length
+                return <option key={l} value={l}>{l} ({cnt}件)</option>
+              })}
+            </select>
+          </div>
+
+          {/* 未確認アイテムリスト */}
+          <div className="stocktake-list">
+            {unconfirmedItems.slice(0, 50).map(item => (
+              <div key={item.id} className="stocktake-item">
+                <div className="stocktake-item-left">
+                  {item.image_url ? (
+                    <img src={item.image_url} alt="" className="item-thumb" onError={e => { e.target.style.display = 'none' }} />
+                  ) : (
+                    <div className="item-thumb-empty" />
+                  )}
+                  <div className="stocktake-item-info">
+                    <div className="stocktake-item-name">{item.name || '(名前なし)'}</div>
+                    <div className="stocktake-item-sub">
+                      {item.loc && <span className="loc-pill">{item.loc}</span>}
+                      {item.bc && <span className="mono">{(item.bc.length > 25 ? item.bc.slice(0, 25) + '...' : item.bc)}</span>}
+                    </div>
+                  </div>
+                </div>
+                <button className="btn sm primary stocktake-check-btn" onClick={() => confirmItemWithFeedback(item)}>✓ 確認</button>
+              </div>
+            ))}
+            {unconfirmedItems.length > 50 && (
+              <div className="stocktake-more">他 {unconfirmedItems.length - 50} 件（フィルタで絞り込んでください）</div>
+            )}
+            {unconfirmedItems.length === 0 && (
+              <div className="stocktake-done">
+                {confirmedIds.size === items.length ? '🎉 全アイテムの確認が完了しました！' : 'このロケーションの全アイテムを確認済みです'}
+              </div>
+            )}
+          </div>
+
+          {/* 棚卸しスキャナー (連続モード) */}
+          {stocktakeScanning && (
+            <BarcodeScanner continuous={true} onScan={handleStocktakeScan} onClose={() => setStocktakeScanning(false)} />
+          )}
+
+          {/* 手動検索モーダル */}
+          {showStocktakeSearch && (
+            <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setShowStocktakeSearch(false) }}>
+              <div className="modal">
+                <div className="modal-header">
+                  <h2>手動検索</h2>
+                  <button className="modal-close" onClick={() => setShowStocktakeSearch(false)}>✕</button>
+                </div>
+                <div className="field">
+                  <input
+                    type="text"
+                    value={stocktakeSearchQuery}
+                    onChange={e => setStocktakeSearchQuery(e.target.value)}
+                    placeholder="物品名・バーコードで検索..."
+                    autoFocus
+                  />
+                </div>
+                <div className="stocktake-search-results">
+                  {stocktakeSearchResults.map(item => (
+                    <div key={item.id} className={'stocktake-search-item' + (confirmedIds.has(item.id) ? ' confirmed' : '')}>
+                      <div className="stocktake-item-left">
+                        {item.image_url ? (
+                          <img src={item.image_url} alt="" className="item-thumb" onError={e => { e.target.style.display = 'none' }} />
+                        ) : (
+                          <div className="item-thumb-empty" />
+                        )}
+                        <div className="stocktake-item-info">
+                          <div className="stocktake-item-name">{item.name || '(名前なし)'}</div>
+                          <div className="stocktake-item-sub">
+                            {item.loc && <span className="loc-pill">{item.loc}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      {confirmedIds.has(item.id) ? (
+                        <span className="stocktake-already">確認済 ✓</span>
+                      ) : (
+                        <button className="btn sm primary" onClick={() => { confirmItemWithFeedback(item) }}>✓ 確認</button>
+                      )}
+                    </div>
+                  ))}
+                  {stocktakeSearchQuery.length >= 1 && stocktakeSearchResults.length === 0 && (
+                    <div className="stocktake-no-result">該当なし</div>
+                  )}
+                  {stocktakeSearchQuery.length === 0 && (
+                    <div className="stocktake-no-result">物品名やバーコード番号を入力してください</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ===== 通常モード ===== */
+        <>
 
       <div className="stats">
         <div className="stat"><div className="lbl">総登録点数</div><div className="val">{items.length}</div></div>
@@ -530,6 +779,9 @@ export default function App() {
         </div>
       )}
       {totalGroups <= PAGE && <div className="pager"><span>{totalGroups + '種類 / ' + items.length + '点'}</span></div>}
+
+        </>
+      )}
 
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />}
 

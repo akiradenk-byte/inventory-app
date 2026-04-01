@@ -113,4 +113,54 @@ tbody td { padding: 9px 10px; vertical-align: middle; }
 .detail-value { font-size: 13px; color: #1a1a18; font-weight: 500; flex: 1; min-width: 0; }
 /* 部品情報取得中 */
 .fetching-info { font-size: 12px; color: #888; padding: 6px 0; text-align: center; background: #faf9f6; border-radius: 8px; margin-bottom: 8px; }
+/* ===== 棚卸しモード ===== */
+.btn.stocktake-btn { background: #FFF8E1; color: #8D6E00; border-color: #E6D17A; font-weight: 600; }
+.btn.stocktake-btn:hover { background: #FFF0B3; }
+.btn.stocktake-end { background: #fff; color: #b03a2e; border-color: #e8c4c0; font-weight: 600; }
+.btn.stocktake-end:hover { background: #fdf0ee; }
+.stocktake-view { display: flex; flex-direction: column; gap: 12px; }
+.stocktake-progress-wrap { background: #fff; border-radius: 10px; border: 1px solid #e8e7e0; padding: 14px 16px; }
+.stocktake-progress-bar { width: 100%; height: 10px; background: #e8e7e0; border-radius: 999px; overflow: hidden; margin-bottom: 8px; }
+.stocktake-progress-fill { height: 100%; background: linear-gradient(90deg, #2E7D32, #4CAF50); border-radius: 999px; transition: width .4s ease; }
+.stocktake-progress-text { font-size: 13px; color: #666; display: flex; align-items: center; gap: 4px; }
+.stocktake-count { font-size: 20px; font-weight: 700; color: #1a1a18; }
+.stocktake-sep { color: #bbb; }
+.stocktake-pct { margin-left: auto; font-size: 16px; font-weight: 700; color: #2E7D32; }
+.stocktake-actions { display: flex; gap: 8px; }
+.stocktake-scan-btn { flex: 1; text-align: center; padding: 12px; font-size: 15px; }
+.stocktake-manual-btn { flex: 1; text-align: center; padding: 12px; font-size: 15px; }
+.scan-toast { border-radius: 10px; padding: 12px 16px; margin: 0; animation: toastIn .2s ease; }
+.scan-toast.ok { background: #E8F5E9; border: 1px solid #A5D6A7; }
+.scan-toast.ng { background: #FFEBEE; border: 1px solid #EF9A9A; }
+.scan-toast-inner { display: flex; align-items: center; gap: 10px; }
+.scan-toast-img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.scan-toast-title { font-size: 14px; font-weight: 600; color: #1a1a18; }
+.scan-toast-sub { font-size: 12px; color: #666; margin-top: 2px; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.scan-history { background: #fff; border-radius: 10px; border: 1px solid #e8e7e0; padding: 10px 12px; }
+.scan-history-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 8px; }
+.scan-history-list { display: flex; flex-direction: column; gap: 6px; }
+.scan-history-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.scan-history-thumb { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+.scan-history-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-history-check { color: #2E7D32; font-weight: 700; flex-shrink: 0; }
+.stocktake-filter { }
+.stocktake-filter select { width: 100%; font-size: 13px; padding: 9px 10px; border-radius: 8px; border: 1px solid #d0cfc7; background: #fff; color: #1a1a18; font-family: inherit; }
+.stocktake-list { display: flex; flex-direction: column; gap: 1px; background: #fff; border-radius: 10px; border: 1px solid #e8e7e0; overflow: hidden; }
+.stocktake-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #f0efe9; }
+.stocktake-item:last-child { border-bottom: none; }
+.stocktake-item-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.item-thumb-empty { width: 32px; height: 32px; border-radius: 6px; background: #f0efe9; flex-shrink: 0; }
+.stocktake-item-info { flex: 1; min-width: 0; }
+.stocktake-item-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stocktake-item-sub { display: flex; align-items: center; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
+.stocktake-item-sub .mono { font-size: 10px; }
+.stocktake-check-btn { flex-shrink: 0; }
+.stocktake-more { padding: 12px; text-align: center; font-size: 12px; color: #888; }
+.stocktake-done { padding: 2rem; text-align: center; font-size: 14px; color: #2E7D32; font-weight: 500; }
+.stocktake-search-results { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.stocktake-search-item { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #f0efe9; }
+.stocktake-search-item.confirmed { opacity: .5; }
+.stocktake-already { font-size: 12px; color: #2E7D32; font-weight: 500; flex-shrink: 0; white-space: nowrap; }
+.stocktake-no-result { padding: 1.5rem; text-align: center; font-size: 13px; color: #aaa; }
 @media (max-width: 600px) { .topbar h1 { font-size: 17px; } .stats { grid-template-columns: repeat(2, 1fr); } .field-row { grid-template-columns: 1fr; } .master-tabs { flex-wrap: wrap; } table { font-size: 12px; } thead th:nth-child(4), tbody td:nth-child(4) { display: none; } .action-cell { flex-wrap: wrap; } }

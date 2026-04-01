@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 
-export default function BarcodeScanner({ onScan, onClose }) {
+export default function BarcodeScanner({ onScan, onClose, continuous = false }) {
   const scannerRef = useRef(null)
   const scannedRef = useRef(false)
   const runningRef = useRef(false)
@@ -20,10 +20,16 @@ export default function BarcodeScanner({ onScan, onClose }) {
   const handleDetected = useCallback((decodedText) => {
     if (scannedRef.current) return
     scannedRef.current = true
-    safeStop().then(() => {
-      setTimeout(() => onScan(decodedText), 100)
-    })
-  }, [onScan])
+    if (continuous) {
+      // 連続スキャンモード: カメラを止めず、コールバックを呼んで2秒後に次のスキャンを受付
+      onScan(decodedText)
+      setTimeout(() => { scannedRef.current = false }, 2000)
+    } else {
+      safeStop().then(() => {
+        setTimeout(() => onScan(decodedText), 100)
+      })
+    }
+  }, [onScan, continuous])
 
   useEffect(() => {
     let mounted = true
