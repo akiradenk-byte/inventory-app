@@ -1125,7 +1125,13 @@ function AppMain({ session, onLogout }) {
               </div>
               <div className="detail-info-row">
                 <span className="detail-label">バーコード</span>
-                <span className="detail-value mono" style={{ wordBreak: 'break-all', fontSize: '12px' }}>{detailItem.bc || '—'}</span>
+                <span className="detail-value mono" style={{ wordBreak: 'break-all', fontSize: '12px' }}>
+                  {detailItem.bc ? (
+                    /^https?:\/\//i.test(detailItem.bc)
+                      ? <a href={detailItem.bc} target="_blank" rel="noopener noreferrer" style={{ color: '#007AFF', textDecoration: 'underline' }}>{detailItem.bc}</a>
+                      : detailItem.bc
+                  ) : '—'}
+                </span>
               </div>
               <div className="detail-info-row">
                 <span className="detail-label">保管場所</span>
