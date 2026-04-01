@@ -6,19 +6,21 @@ import './App.css'
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props)
-    this.state = { hasError: false, error: null }
+    this.state = { hasError: false, error: null, errorMessage: null }
   }
   static getDerivedStateFromError(error) {
     return { hasError: true, error }
   }
   componentDidCatch(error, info) {
     console.error('ErrorBoundary caught:', error, info)
+    this.setState({ errorMessage: error.message + '\n\n' + error.stack })
   }
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ padding: '2rem', textAlign: 'center' }}>
           <p>エラーが発生しました。リロードしてください。</p>
+          <pre style={{ fontSize: '12px', textAlign: 'left', padding: '1rem', background: '#f5f5f5', overflow: 'auto', maxHeight: '300px' }}>{this.state.errorMessage}</pre>
           <button onClick={() => window.location.reload()}>リロード</button>
         </div>
       )
