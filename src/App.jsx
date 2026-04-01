@@ -6,21 +6,23 @@ import './App.css'
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props)
-    this.state = { hasError: false, error: null, errorMessage: null }
+    this.state = { hasError: false, errorMessage: null }
   }
   static getDerivedStateFromError(error) {
-    return { hasError: true, error }
+    return { hasError: true, errorMessage: String(error) }
   }
-  componentDidCatch(error, info) {
-    console.error('ErrorBoundary caught:', error, info)
-    this.setState({ errorMessage: error.message + '\n\n' + error.stack })
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught:', error, errorInfo)
+    this.setState({
+      errorMessage: String(error) + '\n\n' + JSON.stringify(error, Object.getOwnPropertyNames(error || {}), 2) + '\n\nComponent Stack:' + (errorInfo?.componentStack || 'なし')
+    })
   }
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ padding: '2rem', textAlign: 'center' }}>
           <p>エラーが発生しました。リロードしてください。</p>
-          <pre style={{ fontSize: '12px', textAlign: 'left', padding: '1rem', background: '#f5f5f5', overflow: 'auto', maxHeight: '300px' }}>{this.state.errorMessage}</pre>
+          <pre style={{ fontSize: '12px', textAlign: 'left', padding: '1rem', background: '#f5f5f5', overflow: 'auto', maxHeight: '300px' }}>{this.state.errorMessage || 'エラー情報なし'}</pre>
           <button onClick={() => window.location.reload()}>リロード</button>
         </div>
       )
