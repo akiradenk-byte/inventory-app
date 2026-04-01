@@ -1,7 +1,31 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Component } from 'react'
 import { supabase } from './supabase'
 import BarcodeScanner from './BarcodeScanner'
 import './App.css'
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error, info) {
+    console.error('ErrorBoundary caught:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '2rem', textAlign: 'center' }}>
+          <p>エラーが発生しました。リロードしてください。</p>
+          <button onClick={() => window.location.reload()}>リロード</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 const BC = ['b0','b1','b2','b3','b4','b5','b6','b7','b8']
 
@@ -81,13 +105,18 @@ export default function App() {
   }
 
   const handleScan = useCallback((code) => {
-    setShowScanner(false)
-    if (scanTarget === 'search') {
-      setSearch(code)
-      setPage(0)
-    } else {
+    try {
+      setShowScanner(false)
       setFormHidden(false)
-      setForm(f => ({ ...f, bc: code }))
+      if (scanTarget === 'search') {
+        setSearch(code)
+        setPage(0)
+      } else {
+        setForm(f => ({ ...f, bc: code }))
+      }
+    } catch (err) {
+      console.error('handleScan error:', err)
+      alert('スキャンエラー: ' + err.message)
     }
   }, [scanTarget])
 
@@ -208,6 +237,7 @@ export default function App() {
   if (loading) return <div className="loading">{'\u8aad\u307f\u8fbc\u307f\u4e2d...'}</div>
 
   return (
+    <ErrorBoundary>
     <div className="app">
       <div className="topbar">
         <h1>{'\u5728\u5eab\u7ba1\u7406'}</h1>
@@ -407,5 +437,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </ErrorBoundary>
   )
 }

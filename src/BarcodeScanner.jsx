@@ -21,7 +21,7 @@ export default function BarcodeScanner({ onScan, onClose }) {
           await scanner.stop()
         } catch (_) { /* ignore */ }
         if (mounted) {
-          onScan(decodedText)
+          setTimeout(() => onScan(decodedText), 100)
         }
       },
       () => {}
