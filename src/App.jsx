@@ -33,7 +33,6 @@ class ErrorBoundary extends Component {
 
 const BC = ['b0','b1','b2','b3','b4','b5','b6','b7','b8']
 
-// 日立ドメイン判定
 function isHitachiUrl(code) {
   try {
     const u = new URL(code)
@@ -55,10 +54,12 @@ export default function App() {
   const [page, setPage] = useState(0)
   const PAGE = 30
 
+  // Tab navigation
+  const [activeTab, setActiveTab] = useState('home')
+
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
-  const [showMasterInline, setShowMasterInline] = useState(false)
   const [scanTarget, setScanTarget] = useState('search')
   const [formHidden, setFormHidden] = useState(false)
   const [editItem, setEditItem] = useState(null)
@@ -70,18 +71,21 @@ export default function App() {
   const [nameSuggest, setNameSuggest] = useState([])
   const [masterTab, setMasterTab] = useState('category')
 
-  // 画像関連
+  // Image
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const imageInputRef = useRef(null)
 
-  // 詳細モーダル
+  // Detail modal
   const [detailItem, setDetailItem] = useState(null)
 
-  // 部品情報取得中
+  // Fullscreen image viewer
+  const [viewerImage, setViewerImage] = useState(null)
+
+  // Part info fetching
   const [fetchingPart, setFetchingPart] = useState(false)
 
-  // 棚卸しモード
+  // Stocktake
   const [stocktakeMode, setStocktakeMode] = useState(false)
   const [confirmedIds, setConfirmedIds] = useState(new Set())
   const [stocktakeLocFilter, setStocktakeLocFilter] = useState('')
@@ -91,6 +95,12 @@ export default function App() {
   const [stocktakeScanning, setStocktakeScanning] = useState(false)
   const [lastScanResult, setLastScanResult] = useState(null)
   const lastScanTimerRef = useRef(null)
+
+  // Pull to refresh
+  const [pullDistance, setPullDistance] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const touchStartY = useRef(0)
+  const contentRef = useRef(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -106,6 +116,35 @@ export default function App() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Pull to refresh handlers
+  const handleTouchStart = (e) => {
+    if (contentRef.current && contentRef.current.scrollTop === 0) {
+      touchStartY.current = e.touches[0].clientY
+    } else {
+      touchStartY.current = 0
+    }
+  }
+
+  const handleTouchMove = (e) => {
+    if (!touchStartY.current) return
+    const diff = e.touches[0].clientY - touchStartY.current
+    if (diff > 0 && diff < 120) {
+      setPullDistance(diff)
+    }
+  }
+
+  const handleTouchEnd = async () => {
+    if (pullDistance > 60) {
+      setRefreshing(true)
+      setPullDistance(0)
+      await fetchAll()
+      setRefreshing(false)
+    } else {
+      setPullDistance(0)
+    }
+    touchStartY.current = 0
+  }
 
   const getGroups = () => {
     try {
@@ -144,15 +183,11 @@ export default function App() {
     setShowScanner(true)
   }
 
-  // 日立URLの部品情報をAPIで取得
   const fetchHitachiPartInfo = async (url) => {
     try {
       setFetchingPart(true)
       const resp = await fetch('/api/fetch-part-info?url=' + encodeURIComponent(url))
-      if (!resp.ok) {
-        console.error('fetch-part-info error:', resp.status)
-        return null
-      }
+      if (!resp.ok) { console.error('fetch-part-info error:', resp.status); return null }
       return await resp.json()
     } catch (err) {
       console.error('fetchHitachiPartInfo error:', err)
@@ -169,6 +204,7 @@ export default function App() {
       if (scanTarget === 'search') {
         setSearch(code)
         setPage(0)
+        setActiveTab('home')
       } else {
         const urlStr = (code || '').trim()
         let name = ''
@@ -189,7 +225,6 @@ export default function App() {
               cat = 'HITACHI'
             }
 
-            // APIで詳細情報を非同期取得
             fetchHitachiPartInfo(urlStr).then(info => {
               if (info && (info.partName || info.referenceNo || info.price)) {
                 setForm(f => ({
@@ -204,9 +239,7 @@ export default function App() {
               }
             })
           }
-        } catch (e) {
-          // URL解析失敗は無視
-        }
+        } catch (e) {}
 
         setForm(f => ({
           ...f,
@@ -227,7 +260,6 @@ export default function App() {
     setFormHidden(false)
   }
 
-  // 画像アップロード
   const uploadImage = async (itemId, file) => {
     try {
       const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
@@ -270,14 +302,12 @@ export default function App() {
       if (error) { alert('登録エラー: ' + error.message); return }
       savedId = newItem?.id
     }
-    // 画像アップロード
     if (savedId && imageFile) {
       const url = await uploadImage(savedId, imageFile)
       if (url) {
         await supabase.from('items').update({ image_url: url }).eq('id', savedId)
       }
     } else if (savedId && imagePreview === null && editItem?.image_url) {
-      // 画像削除
       await supabase.from('items').update({ image_url: null }).eq('id', savedId)
     }
     setShowAdd(false); setShowEdit(false); setEditItem(null)
@@ -375,21 +405,17 @@ export default function App() {
     setShowEdit(true)
   }
 
-  const openDetail = (item) => {
-    setDetailItem(item)
-  }
+  const openDetail = (item) => { setDetailItem(item) }
 
   const kinds = new Set(items.map(i => (i.name || '') + '_' + (i.bc || ''))).size
   const totalVal = items.reduce((s, i) => s + (i.price || 0), 0)
 
-  // 安全なID表示
   const shortId = (id) => {
-    try {
-      return String(id || '').slice(0, 8)
-    } catch { return '?' }
+    try { return String(id || '').slice(0, 8) }
+    catch { return '?' }
   }
 
-  // ===== 棚卸し機能 =====
+  // ===== Stocktake =====
   const startStocktake = () => {
     setStocktakeMode(true)
     setConfirmedIds(new Set())
@@ -398,6 +424,7 @@ export default function App() {
     setStocktakeSearchQuery('')
     setShowStocktakeSearch(false)
     setLastScanResult(null)
+    setActiveTab('stocktake')
   }
 
   const endStocktake = () => {
@@ -407,6 +434,7 @@ export default function App() {
     setScanHistory([])
     setStocktakeScanning(false)
     setLastScanResult(null)
+    setActiveTab('home')
   }
 
   const confirmItem = (itemId) => {
@@ -420,7 +448,6 @@ export default function App() {
   }
 
   const handleStocktakeScan = useCallback((code) => {
-    // バーコードまたはURLで一致するアイテムを検索
     const codeLower = (code || '').toLowerCase()
     const matched = items.filter(i =>
       (i.bc && i.bc.toLowerCase() === codeLower) ||
@@ -429,7 +456,6 @@ export default function App() {
     )
 
     if (matched.length > 0) {
-      // 一致した全アイテムを確認済みに
       matched.forEach(i => confirmItem(i.id))
       const first = matched[0]
       setScanHistory(prev => [first, ...prev.filter(h => h.id !== first.id)].slice(0, 5))
@@ -440,7 +466,6 @@ export default function App() {
       setLastScanResult({ ok: false, code: code.length > 40 ? code.slice(0, 40) + '...' : code })
     }
 
-    // 2秒後にトースト消去
     if (lastScanTimerRef.current) clearTimeout(lastScanTimerRef.current)
     lastScanTimerRef.current = setTimeout(() => setLastScanResult(null), 2500)
   }, [items])
@@ -458,334 +483,447 @@ export default function App() {
 
   const stocktakePercent = items.length > 0 ? Math.round((confirmedIds.size / items.length) * 100) : 0
 
+  // Open image viewer
+  const openViewer = (url, e) => {
+    if (e) e.stopPropagation()
+    if (url) setViewerImage(url)
+  }
+
   if (loading) return <div className="loading">読み込み中...</div>
 
   return (
     <ErrorBoundary>
     <div className="app">
-      <div className="topbar">
-        <h1>在庫管理</h1>
-        {stocktakeMode ? (
-          <button className="btn stocktake-end" onClick={endStocktake}>✕ 棚卸し終了</button>
-        ) : (
+
+      {/* ===== Header ===== */}
+      <div className="app-header">
+        <div className="header-top">
+          <div className="header-title">
+            {activeTab === 'home' && '在庫管理'}
+            {activeTab === 'scan' && 'スキャン'}
+            {activeTab === 'stocktake' && '棚卸し'}
+            {activeTab === 'settings' && '設定'}
+          </div>
+          <div className="header-actions">
+            {activeTab === 'home' && (
+              <button className="btn icon-btn" onClick={openAdd}>+</button>
+            )}
+            {activeTab === 'stocktake' && stocktakeMode && (
+              <button className="btn sm danger" onClick={endStocktake}>終了</button>
+            )}
+          </div>
+        </div>
+
+        {/* Search bar (home tab only) */}
+        {activeTab === 'home' && (
           <>
-            <button className="btn stocktake-btn" onClick={startStocktake}>📋 棚卸し</button>
-            <button className="btn" onClick={() => setShowMasterInline(!showMasterInline)}>
-              {showMasterInline ? '✕ マスター閉じる' : '⚙ マスター管理'}
-            </button>
-            <button className="btn" onClick={exportCSV}>CSV出力</button>
-            <button className="btn primary" onClick={openAdd}>+ 新規登録</button>
+            <div className="search-bar">
+              <div className="search-input-wrap">
+                <span className="search-icon">🔍</span>
+                <input
+                  type="text"
+                  placeholder="物品名・バーコードで検索..."
+                  value={search}
+                  onChange={e => { setSearch(e.target.value); setPage(0) }}
+                />
+              </div>
+              <button className="search-scan-btn" onClick={() => openScanner('search')}>📷</button>
+            </div>
+            <div className="filter-row">
+              <select className="filter-select" value={catFilter} onChange={e => { setCatFilter(e.target.value); setPage(0) }}>
+                <option value="">全カテゴリ</option>
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select className="filter-select" value={locFilter} onChange={e => { setLocFilter(e.target.value); setPage(0) }}>
+                <option value="">全ロケーション</option>
+                {locations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+              <select className="filter-select" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}>
+                <option value="">全ステータス</option>
+                <option value="instock">保管場所あり</option>
+                <option value="noloc">保管場所なし</option>
+              </select>
+            </div>
           </>
         )}
       </div>
 
-      {stocktakeMode ? (
-        /* ===== 棚卸しモード ===== */
-        <div className="stocktake-view">
-          {/* 進捗 */}
-          <div className="stocktake-progress-wrap">
-            <div className="stocktake-progress-bar">
-              <div className="stocktake-progress-fill" style={{ width: stocktakePercent + '%' }} />
-            </div>
-            <div className="stocktake-progress-text">
-              <span className="stocktake-count">{confirmedIds.size}</span>
-              <span className="stocktake-sep"> / </span>
-              <span>{items.length} 確認済み</span>
-              <span className="stocktake-pct">{stocktakePercent}%</span>
-            </div>
-          </div>
+      {/* ===== Pull to Refresh Indicator ===== */}
+      {(pullDistance > 0 || refreshing) && (
+        <div className="pull-indicator" style={{ height: refreshing ? 40 : Math.min(pullDistance * 0.5, 40) }}>
+          {refreshing ? <div className="pull-spinner" /> : (pullDistance > 60 ? '↻ 離して更新' : '↓ 引いて更新')}
+        </div>
+      )}
 
-          {/* アクションボタン */}
-          <div className="stocktake-actions">
-            <button className="btn primary stocktake-scan-btn" onClick={() => setStocktakeScanning(true)}>📷 スキャン</button>
-            <button className="btn stocktake-manual-btn" onClick={() => { setShowStocktakeSearch(true); setStocktakeSearchQuery('') }}>🔍 手動検索</button>
-          </div>
+      {/* ===== Tab Content ===== */}
+      <div
+        className="tab-content"
+        ref={contentRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
 
-          {/* スキャン結果トースト */}
-          {lastScanResult && (
-            <div className={'scan-toast' + (lastScanResult.ok ? ' ok' : ' ng')}>
-              {lastScanResult.ok ? (
-                <div className="scan-toast-inner">
-                  {lastScanResult.image_url && <img src={lastScanResult.image_url} alt="" className="scan-toast-img" />}
-                  <div>
-                    <div className="scan-toast-title">✓ {lastScanResult.name}</div>
-                    <div className="scan-toast-sub">{lastScanResult.count}点を確認済みにしました</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="scan-toast-inner">
-                  <div>
-                    <div className="scan-toast-title">✗ 該当なし</div>
-                    <div className="scan-toast-sub">{lastScanResult.code}</div>
-                  </div>
-                </div>
-              )}
+        {/* ===== HOME TAB ===== */}
+        {activeTab === 'home' && (
+          <>
+            {/* Stats */}
+            <div className="stats">
+              <div className="stat"><div className="lbl">総登録点数</div><div className="val">{items.length}</div></div>
+              <div className="stat"><div className="lbl">物品種類数</div><div className="val">{kinds}</div></div>
+              <div className="stat"><div className="lbl">在庫総額</div><div className="val sm">{'¥' + totalVal.toLocaleString()}</div></div>
+              <div className="stat"><div className="lbl">カテゴリ数</div><div className="val">{categories.length}</div></div>
             </div>
-          )}
 
-          {/* スキャン履歴 */}
-          {scanHistory.length > 0 && (
-            <div className="scan-history">
-              <div className="scan-history-title">スキャン履歴</div>
-              <div className="scan-history-list">
-                {scanHistory.map((h, idx) => (
-                  <div key={h.id + '-' + idx} className="scan-history-item">
-                    {h.image_url && <img src={h.image_url} alt="" className="scan-history-thumb" onError={e => { e.target.style.display = 'none' }} />}
-                    <span className="scan-history-name">{h.name || '—'}</span>
-                    <span className="scan-history-check">✓</span>
-                  </div>
-                ))}
+            {/* Quick Actions */}
+            <div className="quick-actions">
+              <button className="quick-action" onClick={openAdd}>
+                <span className="quick-action-icon">📦</span>
+                <span className="quick-action-label">新規登録</span>
+              </button>
+              <button className="quick-action" onClick={() => { setActiveTab('scan'); }}>
+                <span className="quick-action-icon">📷</span>
+                <span className="quick-action-label">スキャン登録</span>
+              </button>
+              <button className="quick-action" onClick={startStocktake}>
+                <span className="quick-action-icon">📋</span>
+                <span className="quick-action-label">棚卸し開始</span>
+              </button>
+              <button className="quick-action" onClick={exportCSV}>
+                <span className="quick-action-icon">📄</span>
+                <span className="quick-action-label">CSV出力</span>
+              </button>
+            </div>
+
+            {/* Item List (Card-based) */}
+            <div className="section-header">在庫一覧</div>
+            {sliced.length > 0 ? (
+              <div className="item-card-list">
+                {sliced.map(g => {
+                  const key = (g.name || '') + '||' + (g.bc || '')
+                  const isOpen = !!expanded[key]
+                  const locs = [...new Set((g.items || []).map(i => i.loc).filter(Boolean))]
+                  const firstItem = g.items?.[0]
+                  return [
+                    <div key={key} className="item-card" onClick={() => setExpanded(e => ({ ...e, [key]: !e[key] }))}>
+                      {firstItem?.image_url ? (
+                        <img
+                          src={firstItem.image_url}
+                          alt=""
+                          className="item-thumb"
+                          onClick={(e) => openViewer(firstItem.image_url, e)}
+                          onError={e => { e.target.style.display = 'none' }}
+                        />
+                      ) : (
+                        <div className="item-thumb-empty">📦</div>
+                      )}
+                      <div className="item-info">
+                        <div className="item-name">{g.name || '(名前なし)'}</div>
+                        <div className="item-meta">
+                          {g.cat && <span className={'badge sm ' + BC[catIdx(g.cat)]}>{g.cat}</span>}
+                          {locs.length > 0 && locs.map(l => <span key={l} className="loc-pill">{l}</span>)}
+                          {locs.length === 0 && <span className="no-loc">未設定</span>}
+                        </div>
+                      </div>
+                      <div className="item-right">
+                        <span className="item-count">{(g.items || []).length}</span>
+                        <span className="item-chevron">{isOpen ? '▼' : '▶'}</span>
+                      </div>
+                    </div>,
+                    ...(isOpen ? (g.items || []).map(i => (
+                      <div key={i.id || Math.random()} className="detail-card" onClick={() => openDetail(i)}>
+                        <div className="item-info">
+                          <div className="detail-id">{'ID: ' + shortId(i.id) + '...'}</div>
+                          {i.note && <div className="detail-note">{'📝 ' + i.note}</div>}
+                        </div>
+                        <span className="loc-pill">{i.loc || '未設定'}</span>
+                        <span className="price">{'¥' + (i.price || 0).toLocaleString()}</span>
+                        <div className="action-cell">
+                          <button className="btn sm" onClick={e => { e.stopPropagation(); openEdit(i) }}>編集</button>
+                          <button className="btn sm danger" onClick={e => { e.stopPropagation(); delItem(i.id) }}>削除</button>
+                        </div>
+                      </div>
+                    )) : []),
+                    ...(isOpen ? [
+                      <div key={key + '-actions'} className="detail-card" style={{ justifyContent: 'center', gap: 8 }}>
+                        <button className="btn sm primary" onClick={e => { e.stopPropagation(); openAddSame(g) }}>+ 同じ物品を追加</button>
+                        <button className="btn sm danger" onClick={e => { e.stopPropagation(); delProduct(g) }}>全 {g.items.length} 点を削除</button>
+                      </div>
+                    ] : [])
+                  ]
+                })}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="empty">該当する物品がありません</div>
+            )}
 
-          {/* ロケーションフィルタ */}
-          <div className="stocktake-filter">
-            <select value={stocktakeLocFilter} onChange={e => setStocktakeLocFilter(e.target.value)}>
-              <option value="">全ロケーション ({unconfirmedItems.length}件未確認)</option>
-              {locations.map(l => {
-                const cnt = items.filter(i => !confirmedIds.has(i.id) && i.loc === l).length
-                return <option key={l} value={l}>{l} ({cnt}件)</option>
-              })}
-            </select>
+            {totalGroups > PAGE && (
+              <div className="pager">
+                <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>前へ</button>
+                <span>{(page + 1) + ' / ' + (maxPage + 1)}</span>
+                <button disabled={page === maxPage} onClick={() => setPage(p => p + 1)}>次へ</button>
+              </div>
+            )}
+            {totalGroups <= PAGE && totalGroups > 0 && (
+              <div className="pager"><span>{totalGroups + '種類 / ' + items.length + '点'}</span></div>
+            )}
+          </>
+        )}
+
+        {/* ===== SCAN TAB ===== */}
+        {activeTab === 'scan' && (
+          <div className="scan-tab-content">
+            <button className="scan-tab-btn" onClick={() => {
+              setScanTarget('form')
+              setForm({ bc: '', name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '' })
+              setAddPreset(null); setImageFile(null); setImagePreview(null)
+              setShowScanner(true)
+            }}>
+              📷
+            </button>
+            <div className="scan-tab-label">タップしてバーコードをスキャン</div>
+            <p style={{ fontSize: 13, color: 'var(--text3)', textAlign: 'center', maxWidth: 280 }}>
+              スキャンしたバーコードで新規物品を登録できます。日立部品URLにも対応しています。
+            </p>
           </div>
+        )}
 
-          {/* 未確認アイテムリスト */}
-          <div className="stocktake-list">
-            {unconfirmedItems.slice(0, 50).map(item => (
-              <div key={item.id} className="stocktake-item">
-                <div className="stocktake-item-left">
-                  {item.image_url ? (
-                    <img src={item.image_url} alt="" className="item-thumb" onError={e => { e.target.style.display = 'none' }} />
-                  ) : (
-                    <div className="item-thumb-empty" />
-                  )}
-                  <div className="stocktake-item-info">
-                    <div className="stocktake-item-name">{item.name || '(名前なし)'}</div>
-                    <div className="stocktake-item-sub">
-                      {item.loc && <span className="loc-pill">{item.loc}</span>}
-                      {item.bc && <span className="mono">{(item.bc.length > 25 ? item.bc.slice(0, 25) + '...' : item.bc)}</span>}
+        {/* ===== STOCKTAKE TAB ===== */}
+        {activeTab === 'stocktake' && (
+          <>
+            {!stocktakeMode ? (
+              <div className="scan-tab-content">
+                <button className="quick-action" style={{ width: 160, height: 160, borderRadius: 30 }} onClick={startStocktake}>
+                  <span className="quick-action-icon" style={{ fontSize: 48 }}>📋</span>
+                  <span className="quick-action-label" style={{ fontSize: 16 }}>棚卸し開始</span>
+                </button>
+                <p style={{ fontSize: 13, color: 'var(--text3)', textAlign: 'center', maxWidth: 280 }}>
+                  バーコードスキャンや手動検索で在庫を確認できます。
+                </p>
+              </div>
+            ) : (
+              <div className="stocktake-view">
+                {/* Progress */}
+                <div className="stocktake-progress-wrap">
+                  <div className="stocktake-progress-bar">
+                    <div className="stocktake-progress-fill" style={{ width: stocktakePercent + '%' }} />
+                  </div>
+                  <div className="stocktake-progress-text">
+                    <span className="stocktake-count">{confirmedIds.size}</span>
+                    <span className="stocktake-sep"> / </span>
+                    <span>{items.length} 確認済み</span>
+                    <span className="stocktake-pct">{stocktakePercent}%</span>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="stocktake-actions">
+                  <button className="btn primary stocktake-scan-btn" onClick={() => setStocktakeScanning(true)}>📷 スキャン</button>
+                  <button className="btn stocktake-manual-btn" onClick={() => { setShowStocktakeSearch(true); setStocktakeSearchQuery('') }}>🔍 手動検索</button>
+                </div>
+
+                {/* Scan result toast */}
+                {lastScanResult && (
+                  <div className={'scan-toast' + (lastScanResult.ok ? ' ok' : ' ng')}>
+                    {lastScanResult.ok ? (
+                      <div className="scan-toast-inner">
+                        {lastScanResult.image_url && (
+                          <img src={lastScanResult.image_url} alt="" className="scan-toast-img"
+                            onClick={(e) => openViewer(lastScanResult.image_url, e)} />
+                        )}
+                        <div>
+                          <div className="scan-toast-title">✓ {lastScanResult.name}</div>
+                          <div className="scan-toast-sub">{lastScanResult.count}点を確認済みにしました</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="scan-toast-inner">
+                        <div>
+                          <div className="scan-toast-title">✗ 該当なし</div>
+                          <div className="scan-toast-sub">{lastScanResult.code}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Scan history */}
+                {scanHistory.length > 0 && (
+                  <div className="scan-history">
+                    <div className="scan-history-title">スキャン履歴</div>
+                    <div className="scan-history-list">
+                      {scanHistory.map((h, idx) => (
+                        <div key={h.id + '-' + idx} className="scan-history-item">
+                          {h.image_url && (
+                            <img src={h.image_url} alt="" className="scan-history-thumb"
+                              onClick={(e) => openViewer(h.image_url, e)}
+                              onError={e => { e.target.style.display = 'none' }} />
+                          )}
+                          <span className="scan-history-name">{h.name || '—'}</span>
+                          <span className="scan-history-check">✓</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
-                <button className="btn sm primary stocktake-check-btn" onClick={() => confirmItemWithFeedback(item)}>✓ 確認</button>
-              </div>
-            ))}
-            {unconfirmedItems.length > 50 && (
-              <div className="stocktake-more">他 {unconfirmedItems.length - 50} 件（フィルタで絞り込んでください）</div>
-            )}
-            {unconfirmedItems.length === 0 && (
-              <div className="stocktake-done">
-                {confirmedIds.size === items.length ? '🎉 全アイテムの確認が完了しました！' : 'このロケーションの全アイテムを確認済みです'}
-              </div>
-            )}
-          </div>
+                )}
 
-          {/* 棚卸しスキャナー (連続モード) */}
-          {stocktakeScanning && (
-            <BarcodeScanner continuous={true} onScan={handleStocktakeScan} onClose={() => setStocktakeScanning(false)} />
-          )}
+                {/* Location filter */}
+                <div className="stocktake-filter">
+                  <select value={stocktakeLocFilter} onChange={e => setStocktakeLocFilter(e.target.value)}>
+                    <option value="">全ロケーション ({unconfirmedItems.length}件未確認)</option>
+                    {locations.map(l => {
+                      const cnt = items.filter(i => !confirmedIds.has(i.id) && i.loc === l).length
+                      return <option key={l} value={l}>{l} ({cnt}件)</option>
+                    })}
+                  </select>
+                </div>
 
-          {/* 手動検索モーダル */}
-          {showStocktakeSearch && (
-            <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setShowStocktakeSearch(false) }}>
-              <div className="modal">
-                <div className="modal-header">
-                  <h2>手動検索</h2>
-                  <button className="modal-close" onClick={() => setShowStocktakeSearch(false)}>✕</button>
-                </div>
-                <div className="field">
-                  <input
-                    type="text"
-                    value={stocktakeSearchQuery}
-                    onChange={e => setStocktakeSearchQuery(e.target.value)}
-                    placeholder="物品名・バーコードで検索..."
-                    autoFocus
-                  />
-                </div>
-                <div className="stocktake-search-results">
-                  {stocktakeSearchResults.map(item => (
-                    <div key={item.id} className={'stocktake-search-item' + (confirmedIds.has(item.id) ? ' confirmed' : '')}>
+                {/* Unconfirmed items list */}
+                <div className="stocktake-list">
+                  {unconfirmedItems.slice(0, 50).map(item => (
+                    <div key={item.id} className="stocktake-item">
                       <div className="stocktake-item-left">
                         {item.image_url ? (
-                          <img src={item.image_url} alt="" className="item-thumb" onError={e => { e.target.style.display = 'none' }} />
+                          <img src={item.image_url} alt="" className="item-thumb"
+                            onClick={(e) => openViewer(item.image_url, e)}
+                            onError={e => { e.target.style.display = 'none' }} />
                         ) : (
-                          <div className="item-thumb-empty" />
+                          <div className="item-thumb-empty">📦</div>
                         )}
                         <div className="stocktake-item-info">
                           <div className="stocktake-item-name">{item.name || '(名前なし)'}</div>
                           <div className="stocktake-item-sub">
                             {item.loc && <span className="loc-pill">{item.loc}</span>}
+                            {item.bc && <span className="mono">{(item.bc.length > 25 ? item.bc.slice(0, 25) + '...' : item.bc)}</span>}
                           </div>
                         </div>
                       </div>
-                      {confirmedIds.has(item.id) ? (
-                        <span className="stocktake-already">確認済 ✓</span>
-                      ) : (
-                        <button className="btn sm primary" onClick={() => { confirmItemWithFeedback(item) }}>✓ 確認</button>
-                      )}
+                      <button className="btn sm primary stocktake-check-btn" onClick={() => confirmItemWithFeedback(item)}>✓</button>
                     </div>
                   ))}
-                  {stocktakeSearchQuery.length >= 1 && stocktakeSearchResults.length === 0 && (
-                    <div className="stocktake-no-result">該当なし</div>
+                  {unconfirmedItems.length > 50 && (
+                    <div className="stocktake-more">他 {unconfirmedItems.length - 50} 件</div>
                   )}
-                  {stocktakeSearchQuery.length === 0 && (
-                    <div className="stocktake-no-result">物品名やバーコード番号を入力してください</div>
+                  {unconfirmedItems.length === 0 && (
+                    <div className="stocktake-done">
+                      {confirmedIds.size === items.length ? '🎉 全アイテムの確認が完了しました！' : 'このロケーションの全アイテムを確認済みです'}
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        /* ===== 通常モード ===== */
-        <>
+            )}
+          </>
+        )}
 
-      <div className="stats">
-        <div className="stat"><div className="lbl">総登録点数</div><div className="val">{items.length}</div></div>
-        <div className="stat"><div className="lbl">物品種類数</div><div className="val">{kinds}</div></div>
-        <div className="stat"><div className="lbl">在庫総額</div><div className="val sm">{'¥' + totalVal.toLocaleString()}</div></div>
-        <div className="stat"><div className="lbl">カテゴリ数</div><div className="val">{categories.length}</div></div>
-      </div>
-
-      {showMasterInline && (
-        <div className="master-panel">
-          <div className="master-tabs">
-            <button className={'master-tab' + (masterTab === 'category' ? ' active' : '')} onClick={() => setMasterTab('category')}>カテゴリ管理</button>
-            <button className={'master-tab' + (masterTab === 'location' ? ' active' : '')} onClick={() => setMasterTab('location')}>保管場所管理</button>
-          </div>
-          {masterTab === 'category' && (
-            <div className="master-content">
-              <div className="master-add">
-                <input type="text" value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="新しいカテゴリ名" onKeyDown={e => e.key === 'Enter' && addCat()} />
-                <button className="btn sm primary" onClick={addCat}>追加</button>
+        {/* ===== SETTINGS TAB ===== */}
+        {activeTab === 'settings' && (
+          <>
+            <div className="settings-section-title">データ管理</div>
+            <div className="settings-section">
+              <div className="settings-row" onClick={exportCSV}>
+                <span className="settings-row-icon">📄</span>
+                <span className="settings-row-label">CSV出力</span>
+                <span className="settings-row-chevron">›</span>
               </div>
-              <div className="master-list">
-                {categories.map((c, i) => (
-                  <div key={c} className="master-item">
-                    <span className={'badge ' + BC[i % BC.length]}>{c}</span>
-                    <button className="del-x" onClick={() => delCat(c)}>×</button>
+            </div>
+
+            <div className="settings-section-title">マスター管理</div>
+            <div className="master-panel">
+              <div className="master-tabs">
+                <button className={'master-tab' + (masterTab === 'category' ? ' active' : '')} onClick={() => setMasterTab('category')}>カテゴリ</button>
+                <button className={'master-tab' + (masterTab === 'location' ? ' active' : '')} onClick={() => setMasterTab('location')}>保管場所</button>
+              </div>
+              {masterTab === 'category' && (
+                <div>
+                  <div className="master-add">
+                    <input type="text" value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="新しいカテゴリ名" onKeyDown={e => e.key === 'Enter' && addCat()} />
+                    <button className="btn sm primary" onClick={addCat}>追加</button>
                   </div>
-                ))}
-                {categories.length === 0 && <div className="master-empty">カテゴリがありません</div>}
-              </div>
-            </div>
-          )}
-          {masterTab === 'location' && (
-            <div className="master-content">
-              <div className="master-add">
-                <input type="text" value={newLoc} onChange={e => setNewLoc(e.target.value)} placeholder="新しい保管場所名" onKeyDown={e => e.key === 'Enter' && addLoc()} />
-                <button className="btn sm primary" onClick={addLoc}>追加</button>
-              </div>
-              <div className="master-list">
-                {locations.map(l => (
-                  <div key={l} className="master-item">
-                    <span className="master-loc">{l}</span>
-                    <button className="del-x" onClick={() => delLoc(l)}>×</button>
-                  </div>
-                ))}
-                {locations.length === 0 && <div className="master-empty">保管場所がありません</div>}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="toolbar">
-        <input type="text" placeholder="物品名・バーコードで検索..." value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
-        <button className="scan-btn" onClick={() => openScanner('search')}>📷 スキャン</button>
-        <select value={catFilter} onChange={e => { setCatFilter(e.target.value); setPage(0) }}>
-          <option value="">全カテゴリ</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={locFilter} onChange={e => { setLocFilter(e.target.value); setPage(0) }}>
-          <option value="">全ロケーション</option>
-          {locations.map(l => <option key={l} value={l}>{l}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}>
-          <option value="">全ステータス</option>
-          <option value="instock">保管場所あり</option>
-          <option value="noloc">保管場所なし</option>
-        </select>
-      </div>
-
-      <div className="tbl-wrap">
-        <table>
-          <thead><tr>
-            <th></th><th>物品</th><th>ロケーション</th><th>ステータス</th><th>操作</th>
-          </tr></thead>
-          <tbody>
-            {sliced.map(g => {
-              const key = (g.name || '') + '||' + (g.bc || '')
-              const isOpen = !!expanded[key]
-              const locs = [...new Set((g.items || []).map(i => i.loc).filter(Boolean))]
-              const firstItem = g.items?.[0]
-              return [
-                <tr key={key} className="group-row" onClick={() => setExpanded(e => ({ ...e, [key]: !e[key] }))}>
-                  <td>
-                    <div className="group-left">
-                      {firstItem?.image_url && (
-                        <img src={firstItem.image_url} alt="" className="item-thumb" onError={e => { e.target.style.display = 'none' }} />
-                      )}
-                      <span className={'arrow' + (isOpen ? ' open' : '')}>▶</span>
-                    </div>
-                  </td>
-                  <td className="name-cell">
-                    <div>{g.name || '(名前なし)'}</div>
-                    <div className="sub-info">
-                      {g.cat && <span className={'badge sm ' + BC[catIdx(g.cat)]}>{g.cat}</span>}
-                      {g.bc && <span className="mono">{g.bc.length > 30 ? g.bc.slice(0, 30) + '...' : g.bc}</span>}
-                      <span className="count-badge">{(g.items || []).length + '点'}</span>
-                    </div>
-                  </td>
-                  <td>{locs.length > 0 ? locs.map(l => <span key={l} className="loc-pill">{l}</span>) : <span className="no-loc">未設定</span>}</td>
-                  <td><span className="status-badge instock">在庫あり</span></td>
-                  <td>
-                    <div className="action-cell">
-                      <button className="btn sm primary" onClick={e => { e.stopPropagation(); openAddSame(g) }}>+ 追加</button>
-                      <button className="btn sm danger" onClick={e => { e.stopPropagation(); delProduct(g) }}>全削除</button>
-                    </div>
-                  </td>
-                </tr>,
-                ...(isOpen ? (g.items || []).map(i => (
-                  <tr key={i.id || Math.random()} className="detail-row" onClick={() => openDetail(i)}>
-                    <td></td>
-                    <td>
-                      <div className="detail-id">{'ID: ' + shortId(i.id) + '...'}</div>
-                      {i.note && <div className="detail-note">{'📝 ' + i.note}</div>}
-                    </td>
-                    <td><span className="loc-pill white">{i.loc || '未設定'}</span></td>
-                    <td><span className="price">{'¥' + (i.price || 0).toLocaleString()}</span></td>
-                    <td>
-                      <div className="action-cell">
-                        <button className="btn sm" onClick={e => { e.stopPropagation(); openEdit(i) }}>編集</button>
-                        <button className="btn sm danger" onClick={e => { e.stopPropagation(); delItem(i.id) }}>削除</button>
+                  <div className="master-list">
+                    {categories.map((c, i) => (
+                      <div key={c} className="master-item">
+                        <span className={'badge ' + BC[i % BC.length]}>{c}</span>
+                        <button className="del-x" onClick={() => delCat(c)}>×</button>
                       </div>
-                    </td>
-                  </tr>
-                )) : [])
-              ]
-            })}
-          </tbody>
-        </table>
-        {sliced.length === 0 && <div className="empty">該当する物品がありません</div>}
+                    ))}
+                    {categories.length === 0 && <div className="master-empty">カテゴリがありません</div>}
+                  </div>
+                </div>
+              )}
+              {masterTab === 'location' && (
+                <div>
+                  <div className="master-add">
+                    <input type="text" value={newLoc} onChange={e => setNewLoc(e.target.value)} placeholder="新しい保管場所名" onKeyDown={e => e.key === 'Enter' && addLoc()} />
+                    <button className="btn sm primary" onClick={addLoc}>追加</button>
+                  </div>
+                  <div className="master-list">
+                    {locations.map(l => (
+                      <div key={l} className="master-item">
+                        <span className="master-loc">{l}</span>
+                        <button className="del-x" onClick={() => delLoc(l)}>×</button>
+                      </div>
+                    ))}
+                    {locations.length === 0 && <div className="master-empty">保管場所がありません</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="settings-section-title">アプリ情報</div>
+            <div className="settings-section">
+              <div className="settings-row" style={{ cursor: 'default' }}>
+                <span className="settings-row-icon">📦</span>
+                <span className="settings-row-label">在庫管理アプリ</span>
+                <span style={{ color: 'var(--text3)', fontSize: 13 }}>v2.0</span>
+              </div>
+              <div className="settings-row" style={{ cursor: 'default' }}>
+                <span className="settings-row-icon">💾</span>
+                <span className="settings-row-label">登録数</span>
+                <span style={{ color: 'var(--text2)', fontSize: 14, fontWeight: 600 }}>{items.length} 点</span>
+              </div>
+            </div>
+          </>
+        )}
+
       </div>
 
-      {totalGroups > PAGE && (
-        <div className="pager">
-          <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>前へ</button>
-          <span>{(page + 1) + ' / ' + (maxPage + 1) + ' ページ（' + totalGroups + '種類）'}</span>
-          <button disabled={page === maxPage} onClick={() => setPage(p => p + 1)}>次へ</button>
-        </div>
-      )}
-      {totalGroups <= PAGE && <div className="pager"><span>{totalGroups + '種類 / ' + items.length + '点'}</span></div>}
+      {/* ===== Bottom Tab Bar ===== */}
+      <div className="tab-bar">
+        <button className={'tab-item' + (activeTab === 'home' ? ' active' : '')} onClick={() => setActiveTab('home')}>
+          <span className="tab-icon">🏠</span>
+          <span className="tab-label">ホーム</span>
+        </button>
+        <button className={'tab-item' + (activeTab === 'scan' ? ' active' : '')} onClick={() => setActiveTab('scan')}>
+          <span className="tab-icon">📷</span>
+          <span className="tab-label">スキャン</span>
+        </button>
+        <button className={'tab-item' + (activeTab === 'stocktake' ? ' active' : '')} onClick={() => setActiveTab('stocktake')}>
+          <span className="tab-icon">📋</span>
+          <span className="tab-label">棚卸し</span>
+        </button>
+        <button className={'tab-item' + (activeTab === 'settings' ? ' active' : '')} onClick={() => setActiveTab('settings')}>
+          <span className="tab-icon">⚙️</span>
+          <span className="tab-label">設定</span>
+        </button>
+      </div>
 
-        </>
-      )}
-
+      {/* ===== Scanner Modal ===== */}
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />}
 
-      {/* 物品詳細モーダル */}
+      {/* ===== Stocktake Scanner (continuous) ===== */}
+      {stocktakeScanning && (
+        <BarcodeScanner continuous={true} onScan={handleStocktakeScan} onClose={() => setStocktakeScanning(false)} />
+      )}
+
+      {/* ===== Image Viewer (Fullscreen) ===== */}
+      {viewerImage && (
+        <div className="image-viewer" onClick={() => setViewerImage(null)}>
+          <button className="image-viewer-close" onClick={() => setViewerImage(null)}>✕</button>
+          <img src={viewerImage} alt="" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+
+      {/* ===== Detail Modal ===== */}
       {detailItem && (
         <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setDetailItem(null) }}>
           <div className="modal">
@@ -795,7 +933,7 @@ export default function App() {
             </div>
 
             {detailItem.image_url && (
-              <div className="detail-image-wrap">
+              <div className="detail-image-wrap" onClick={() => openViewer(detailItem.image_url)}>
                 <img src={detailItem.image_url} alt={detailItem.name || ''} className="detail-image" onError={e => { e.target.style.display = 'none' }} />
               </div>
             )}
@@ -839,7 +977,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 登録・編集モーダル */}
+      {/* ===== Add/Edit Modal ===== */}
       {(showAdd || showEdit) && !formHidden && (
         <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') { setShowAdd(false); setShowEdit(false); setNameSuggest([]) } }}>
           <div className="modal">
@@ -848,13 +986,12 @@ export default function App() {
               <button className="modal-close" onClick={() => { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setImageFile(null); setImagePreview(null) }}>✕</button>
             </div>
 
-            {/* 画像 */}
             <div className="field">
               <label>画像</label>
               <input ref={imageInputRef} type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
               {imagePreview ? (
                 <div className="image-preview-wrap">
-                  <img src={imagePreview} alt="プレビュー" className="image-preview" />
+                  <img src={imagePreview} alt="プレビュー" className="image-preview" onClick={() => openViewer(imagePreview)} />
                   <button type="button" className="image-remove-btn" onClick={() => { setImageFile(null); setImagePreview(null) }}>✕</button>
                   <button type="button" className="image-change-btn" onClick={() => imageInputRef.current?.click()}>変更</button>
                 </div>
@@ -867,7 +1004,7 @@ export default function App() {
 
             <div className="field">
               <label>バーコード</label>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <input type="text" value={form.bc} onChange={e => setForm(f => ({ ...f, bc: e.target.value }))} placeholder="バーコード番号（任意）" style={{ flex: 1 }} />
                 <button className="scan-btn" onClick={() => openScanner('form')}>📷</button>
               </div>
@@ -916,6 +1053,60 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ===== Stocktake Search Modal ===== */}
+      {showStocktakeSearch && (
+        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setShowStocktakeSearch(false) }}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2>手動検索</h2>
+              <button className="modal-close" onClick={() => setShowStocktakeSearch(false)}>✕</button>
+            </div>
+            <div className="field">
+              <input
+                type="text"
+                value={stocktakeSearchQuery}
+                onChange={e => setStocktakeSearchQuery(e.target.value)}
+                placeholder="物品名・バーコードで検索..."
+                autoFocus
+              />
+            </div>
+            <div className="stocktake-search-results">
+              {stocktakeSearchResults.map(item => (
+                <div key={item.id} className={'stocktake-search-item' + (confirmedIds.has(item.id) ? ' confirmed' : '')}>
+                  <div className="stocktake-item-left">
+                    {item.image_url ? (
+                      <img src={item.image_url} alt="" className="item-thumb"
+                        onClick={(e) => openViewer(item.image_url, e)}
+                        onError={e => { e.target.style.display = 'none' }} />
+                    ) : (
+                      <div className="item-thumb-empty">📦</div>
+                    )}
+                    <div className="stocktake-item-info">
+                      <div className="stocktake-item-name">{item.name || '(名前なし)'}</div>
+                      <div className="stocktake-item-sub">
+                        {item.loc && <span className="loc-pill">{item.loc}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  {confirmedIds.has(item.id) ? (
+                    <span className="stocktake-already">確認済 ✓</span>
+                  ) : (
+                    <button className="btn sm primary" onClick={() => { confirmItemWithFeedback(item) }}>✓</button>
+                  )}
+                </div>
+              ))}
+              {stocktakeSearchQuery.length >= 1 && stocktakeSearchResults.length === 0 && (
+                <div className="stocktake-no-result">該当なし</div>
+              )}
+              {stocktakeSearchQuery.length === 0 && (
+                <div className="stocktake-no-result">物品名やバーコード番号を入力してください</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
     </ErrorBoundary>
   )
