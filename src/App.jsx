@@ -23,6 +23,7 @@ export default function App() {
   const [showScanner, setShowScanner] = useState(false)
   const [showMasterInline, setShowMasterInline] = useState(false)
   const [scanTarget, setScanTarget] = useState('search')
+  const [formHidden, setFormHidden] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [addPreset, setAddPreset] = useState(null)
 
@@ -73,15 +74,27 @@ export default function App() {
 
   const catIdx = c => { const i = categories.indexOf(c); return i < 0 ? 0 : i % BC.length }
 
+  const openScanner = (target) => {
+    setScanTarget(target)
+    if (target === 'form') setFormHidden(true)
+    setShowScanner(true)
+  }
+
   const handleScan = useCallback((code) => {
     setShowScanner(false)
     if (scanTarget === 'search') {
       setSearch(code)
       setPage(0)
     } else {
+      setFormHidden(false)
       setForm(f => ({ ...f, bc: code }))
     }
   }, [scanTarget])
+
+  const handleScanClose = () => {
+    setShowScanner(false)
+    setFormHidden(false)
+  }
 
   const saveItem = async () => {
     if (!form.name.trim()) { alert('\u7269\u54c1\u540d\u306f\u5fc5\u9808\u3067\u3059'); return }
@@ -257,7 +270,7 @@ export default function App() {
 
       <div className="toolbar">
         <input type="text" placeholder={'\u7269\u54c1\u540d\u30fb\u30d0\u30fc\u30b3\u30fc\u30c9\u3067\u691c\u7d22...'} value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
-        <button className="scan-btn" onClick={() => { setScanTarget('search'); setShowScanner(true) }}>{'\ud83d\udcf7 \u30b9\u30ad\u30e3\u30f3'}</button>
+        <button className="scan-btn" onClick={() => openScanner('search')}>{'\ud83d\udcf7 \u30b9\u30ad\u30e3\u30f3'}</button>
         <select value={catFilter} onChange={e => { setCatFilter(e.target.value); setPage(0) }}>
           <option value="">{'\u5168\u30ab\u30c6\u30b4\u30ea'}</option>
           {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -336,9 +349,9 @@ export default function App() {
       )}
       {totalGroups <= PAGE && <div className="pager"><span>{totalGroups + '\u7a2e\u985e / ' + items.length + '\u70b9'}</span></div>}
 
-      {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
+      {showScanner && <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />}
 
-      {(showAdd || showEdit) && (
+      {(showAdd || showEdit) && !formHidden && (
         <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') { setShowAdd(false); setShowEdit(false); setNameSuggest([]) } }}>
           <div className="modal">
             <div className="modal-header">
@@ -349,7 +362,7 @@ export default function App() {
               <label>{'\u30d0\u30fc\u30b3\u30fc\u30c9'}</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input type="text" value={form.bc} onChange={e => setForm(f => ({ ...f, bc: e.target.value }))} placeholder={'\u30d0\u30fc\u30b3\u30fc\u30c9\u756a\u53f7\uff08\u4efb\u610f\uff09'} style={{ flex: 1 }} />
-                <button className="scan-btn" onClick={() => { setScanTarget('form'); setShowScanner(true) }}>{'\ud83d\udcf7'}</button>
+                <button className="scan-btn" onClick={() => openScanner('form')}>{'\ud83d\udcf7'}</button>
               </div>
             </div>
             <div className="field" style={{ position: 'relative' }}>
