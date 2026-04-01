@@ -1,45 +1,56 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 
 export default function BarcodeScanner({ onScan, onClose }) {
   const scannerRef = useRef(null)
   const scannedRef = useRef(false)
+  const runningRef = useRef(false)
+
+  const safeStop = async () => {
+    if (scannerRef.current && runningRef.current) {
+      try {
+        runningRef.current = false
+        await scannerRef.current.stop()
+      } catch (e) {
+        // 既に停止済みの場合は無視
+      }
+    }
+  }
+
+  const handleDetected = useCallback((decodedText) => {
+    if (scannedRef.current) return
+    scannedRef.current = true
+    safeStop().then(() => {
+      setTimeout(() => onScan(decodedText), 100)
+    })
+  }, [onScan])
 
   useEffect(() => {
     let mounted = true
     const scanner = new Html5Qrcode('barcode-reader')
     scannerRef.current = scanner
-    scannedRef.current = false
 
     scanner.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 250, height: 150 } },
-      async (decodedText) => {
-        if (scannedRef.current) return
-        scannedRef.current = true
-        try {
-          await scanner.stop()
-        } catch (_) { /* ignore */ }
-        if (mounted) {
-          setTimeout(() => onScan(decodedText), 100)
-        }
+      (decodedText) => {
+        if (mounted) handleDetected(decodedText)
       },
       () => {}
-    ).catch(() => {})
+    ).then(() => {
+      runningRef.current = true
+    }).catch((err) => {
+      console.error('カメラ起動エラー:', err)
+    })
 
     return () => {
       mounted = false
-      scanner.stop().catch(() => {})
+      safeStop()
     }
-  }, [onScan])
+  }, [handleDetected])
 
-  const handleClose = async () => {
-    try {
-      if (scannerRef.current) {
-        await scannerRef.current.stop()
-      }
-    } catch (_) { /* ignore */ }
-    onClose()
+  const handleClose = () => {
+    safeStop().then(() => onClose())
   }
 
   return (
