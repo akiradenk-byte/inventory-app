@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#007AFF"/>
+  <!-- Box body -->
+  <rect x="116" y="200" width="280" height="200" rx="16" fill="none" stroke="white" stroke-width="20" stroke-linejoin="round"/>
+  <!-- Box flaps (open top) -->
+  <polyline points="116,200 176,130 256,170 336,130 396,200" fill="none" stroke="white" stroke-width="20" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Center line on box -->
+  <line x1="256" y1="170" x2="256" y2="280" stroke="white" stroke-width="16" stroke-linecap="round"/>
+  <!-- Barcode lines at bottom of box -->
+  <line x1="176" y1="320" x2="176" y2="370" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <line x1="196" y1="320" x2="196" y2="370" stroke="white" stroke-width="12" stroke-linecap="round"/>
+  <line x1="216" y1="320" x2="216" y2="370" stroke="white" stroke-width="6" stroke-linecap="round"/>
+  <line x1="232" y1="320" x2="232" y2="370" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  <line x1="252" y1="320" x2="252" y2="370" stroke="white" stroke-width="6" stroke-linecap="round"/>
+  <line x1="268" y1="320" x2="268" y2="370" stroke="white" stroke-width="14" stroke-linecap="round"/>
+  <line x1="290" y1="320" x2="290" y2="370" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <line x1="308" y1="320" x2="308" y2="370" stroke="white" stroke-width="6" stroke-linecap="round"/>
+  <line x1="324" y1="320" x2="324" y2="370" stroke="white" stroke-width="12" stroke-linecap="round"/>
+  <line x1="344" y1="320" x2="344" y2="370" stroke="white" stroke-width="6" stroke-linecap="round"/>
+  <!-- Checkmark circle (top right) -->
+  <circle cx="380" cy="140" r="50" fill="#34C759"/>
+  <polyline points="355,140 373,158 405,122" fill="none" stroke="white" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -32,6 +32,14 @@ class ErrorBoundary extends Component {
 }
 
 const BC = ['b0','b1','b2','b3','b4','b5','b6','b7','b8']
+const CONDITIONS = ['', '新品', '新古品', '中古（良品）', '中古（可）', 'ジャンク']
+const CONDITION_COLORS = {
+  '新品': { bg: '#E1F5EE', color: '#085041' },
+  '新古品': { bg: '#E6F1FB', color: '#0C447C' },
+  '中古（良品）': { bg: '#FAEEDA', color: '#633806' },
+  '中古（可）': { bg: '#FAECE7', color: '#712B13' },
+  'ジャンク': { bg: '#FCEBEB', color: '#791F1F' },
+}
 
 function isHitachiUrl(code) {
   try {
@@ -50,6 +58,7 @@ export default function App() {
   const [catFilter, setCatFilter] = useState('')
   const [locFilter, setLocFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [conditionFilter, setConditionFilter] = useState('')
   const [expanded, setExpanded] = useState({})
   const [page, setPage] = useState(0)
   const PAGE = 30
@@ -65,7 +74,7 @@ export default function App() {
   const [editItem, setEditItem] = useState(null)
   const [addPreset, setAddPreset] = useState(null)
 
-  const [form, setForm] = useState({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '' })
+  const [form, setForm] = useState({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '', condition: '' })
   const [newCat, setNewCat] = useState('')
   const [newLoc, setNewLoc] = useState('')
   const [nameSuggest, setNameSuggest] = useState([])
@@ -155,6 +164,7 @@ export default function App() {
         if (locFilter && i.loc !== locFilter) return false
         if (statusFilter === 'instock' && !i.loc) return false
         if (statusFilter === 'noloc' && i.loc) return false
+        if (conditionFilter && (i.condition || '') !== conditionFilter) return false
         return true
       })
       const map = {}
@@ -290,7 +300,8 @@ export default function App() {
       cat: form.cat || '',
       loc: form.loc || '',
       price: parseInt(form.price) || 0,
-      note: (form.note || '').trim()
+      note: (form.note || '').trim(),
+      condition: form.condition || null,
     }
     let savedId = null
     if (editItem) {
@@ -311,7 +322,7 @@ export default function App() {
       await supabase.from('items').update({ image_url: null }).eq('id', savedId)
     }
     setShowAdd(false); setShowEdit(false); setEditItem(null)
-    setForm({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '' })
+    setForm({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '', condition: '' })
     setNameSuggest([])
     setImageFile(null)
     setImagePreview(null)
@@ -387,7 +398,7 @@ export default function App() {
   }
 
   const openAddSame = (g) => {
-    setForm({ bc: g.bc, name: g.name, cat: g.cat, loc: '', price: g.items[0]?.price || 0, note: '', image_url: '' })
+    setForm({ bc: g.bc, name: g.name, cat: g.cat, loc: '', price: g.items[0]?.price || 0, note: '', image_url: '', condition: g.items[0]?.condition || '' })
     setAddPreset(g); setImageFile(null); setImagePreview(null); setShowAdd(true)
   }
 
@@ -398,7 +409,7 @@ export default function App() {
 
   const openEdit = (item) => {
     setEditItem(item)
-    setForm({ bc: item.bc || '', name: item.name || '', cat: item.cat || '', loc: item.loc || '', price: item.price || 0, note: item.note || '', image_url: item.image_url || '' })
+    setForm({ bc: item.bc || '', name: item.name || '', cat: item.cat || '', loc: item.loc || '', price: item.price || 0, note: item.note || '', image_url: item.image_url || '', condition: item.condition || '' })
     setImageFile(null)
     setImagePreview(item.image_url || null)
     setDetailItem(null)
@@ -543,6 +554,10 @@ export default function App() {
                 <option value="instock">保管場所あり</option>
                 <option value="noloc">保管場所なし</option>
               </select>
+              <select className="filter-select" value={conditionFilter} onChange={e => { setConditionFilter(e.target.value); setPage(0) }}>
+                <option value="">全状態</option>
+                {CONDITIONS.filter(c => c).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
           </>
         )}
@@ -623,6 +638,9 @@ export default function App() {
                           {g.cat && <span className={'badge sm ' + BC[catIdx(g.cat)]}>{g.cat}</span>}
                           {locs.length > 0 && locs.map(l => <span key={l} className="loc-pill">{l}</span>)}
                           {locs.length === 0 && <span className="no-loc">未設定</span>}
+                          {firstItem?.condition && (
+                            <span className="condition-badge" style={{ background: CONDITION_COLORS[firstItem.condition]?.bg || '#F1EFE8', color: CONDITION_COLORS[firstItem.condition]?.color || '#444' }}>{firstItem.condition}</span>
+                          )}
                         </div>
                       </div>
                       <div className="item-right">
@@ -956,6 +974,14 @@ export default function App() {
                 <span className="detail-value">{detailItem.loc ? <span className="loc-pill">{detailItem.loc}</span> : '未設定'}</span>
               </div>
               <div className="detail-info-row">
+                <span className="detail-label">状態</span>
+                <span className="detail-value">
+                  {detailItem.condition ? (
+                    <span className="condition-badge" style={{ background: CONDITION_COLORS[detailItem.condition]?.bg || '#F1EFE8', color: CONDITION_COLORS[detailItem.condition]?.color || '#444' }}>{detailItem.condition}</span>
+                  ) : '未指定'}
+                </span>
+              </div>
+              <div className="detail-info-row">
                 <span className="detail-label">単価</span>
                 <span className="detail-value">{'¥' + (detailItem.price || 0).toLocaleString()}</span>
               </div>
@@ -1037,9 +1063,18 @@ export default function App() {
                 </select>
               </div>
             </div>
-            <div className="field">
-              <label>単価（円）</label>
-              <input type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} min="0" />
+            <div className="field-row">
+              <div className="field">
+                <label>状態</label>
+                <select value={form.condition} onChange={e => setForm(f => ({ ...f, condition: e.target.value }))}>
+                  <option value="">未指定</option>
+                  {CONDITIONS.filter(c => c).map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>単価（円）</label>
+                <input type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} min="0" />
+              </div>
             </div>
             <div className="field">
               <label>メモ</label>
