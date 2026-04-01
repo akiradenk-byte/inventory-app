@@ -1377,3 +1377,28 @@ body {
   opacity: .6;
   cursor: not-allowed;
 }
+
+.login-success {
+  font-size: 13px;
+  color: var(--success);
+  background: var(--success-light);
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.login-switch {
+  display: block;
+  margin: 16px auto 0;
+  padding: 8px;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.login-switch:active { opacity: .6; }

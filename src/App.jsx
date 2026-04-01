@@ -4,20 +4,40 @@ import BarcodeScanner from './BarcodeScanner'
 import './App.css'
 
 // ===== ログイン画面 =====
-function LoginScreen({ onLogin }) {
+function LoginScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isSignUp, setIsSignUp] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setSuccess('')
     setLoading(true)
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (authError) {
-      setError('ログインに失敗しました: ' + authError.message)
+
+    if (isSignUp) {
+      if (password.length < 6) {
+        setError('パスワードは6文字以上で入力してください')
+        setLoading(false)
+        return
+      }
+      const { error: signUpError } = await supabase.auth.signUp({ email, password })
+      setLoading(false)
+      if (signUpError) {
+        setError('登録に失敗しました: ' + signUpError.message)
+      } else {
+        setSuccess('確認メールを送信しました。メール内のリンクをクリックしてから、ログインしてください。')
+        setIsSignUp(false)
+      }
+    } else {
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+      setLoading(false)
+      if (authError) {
+        setError('ログインに失敗しました: ' + authError.message)
+      }
     }
   }
 
@@ -26,7 +46,7 @@ function LoginScreen({ onLogin }) {
       <div className="login-card">
         <img src="/icon-192.png" alt="在庫管理" className="login-logo" />
         <h1 className="login-title">在庫管理</h1>
-        <p className="login-subtitle">ログインしてください</p>
+        <p className="login-subtitle">{isSignUp ? '新規アカウント登録' : 'ログインしてください'}</p>
         <form onSubmit={handleSubmit} className="login-form">
           <div className="field">
             <label>メールアドレス</label>
@@ -45,16 +65,20 @@ function LoginScreen({ onLogin }) {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder="パスワード"
-              autoComplete="current-password"
+              placeholder={isSignUp ? '6文字以上のパスワード' : 'パスワード'}
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
               required
             />
           </div>
           {error && <div className="login-error">{error}</div>}
+          {success && <div className="login-success">{success}</div>}
           <button type="submit" className="btn primary login-btn" disabled={loading}>
-            {loading ? 'ログイン中...' : 'ログイン'}
+            {loading ? '処理中...' : (isSignUp ? '新規登録' : 'ログイン')}
           </button>
         </form>
+        <button className="login-switch" onClick={() => { setIsSignUp(!isSignUp); setError(''); setSuccess('') }}>
+          {isSignUp ? 'アカウントをお持ちの方はこちら' : '新規アカウント登録はこちら'}
+        </button>
       </div>
     </div>
   )
