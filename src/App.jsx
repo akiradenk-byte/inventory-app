@@ -3,6 +3,63 @@ import { supabase } from './supabase'
 import BarcodeScanner from './BarcodeScanner'
 import './App.css'
 
+// ===== ログイン画面 =====
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    setLoading(false)
+    if (authError) {
+      setError('ログインに失敗しました: ' + authError.message)
+    }
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <img src="/icon-192.png" alt="在庫管理" className="login-logo" />
+        <h1 className="login-title">在庫管理</h1>
+        <p className="login-subtitle">ログインしてください</p>
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="field">
+            <label>メールアドレス</label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="example@email.com"
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div className="field">
+            <label>パスワード</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="パスワード"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {error && <div className="login-error">{error}</div>}
+          <button type="submit" className="btn primary login-btn" disabled={loading}>
+            {loading ? 'ログイン中...' : 'ログイン'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props)
@@ -50,6 +107,35 @@ function isHitachiUrl(code) {
 }
 
 export default function App() {
+  // Auth
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s)
+      setAuthLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s)
+      if (!s) setAuthLoading(false)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleLogout = async () => {
+    if (!confirm('ログアウトしますか？')) return
+    await supabase.auth.signOut()
+    setSession(null)
+  }
+
+  if (authLoading) return <div className="loading">読み込み中...</div>
+  if (!session) return <LoginScreen />
+
+  return <AppMain session={session} onLogout={handleLogout} />
+}
+
+function AppMain({ session, onLogout }) {
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([])
   const [locations, setLocations] = useState([])
@@ -237,13 +323,19 @@ export default function App() {
 
             fetchHitachiPartInfo(urlStr).then(info => {
               if (info && (info.partName || info.referenceNo || info.price)) {
+                // 価格を数値に変換 (例: "¥6,050" → 6050)
+                let priceNum = 0
+                if (info.price) {
+                  const priceMatch = info.price.replace(/[¥￥,\s]/g, '').match(/\d+/)
+                  if (priceMatch) priceNum = parseInt(priceMatch[0], 10)
+                }
                 setForm(f => ({
                   ...f,
                   name: info.partName ? (pno.toUpperCase() + ' ' + info.partName) : f.name,
+                  ...(priceNum > 0 ? { price: priceNum } : {}),
                   note: [
+                    info.partName ? '部品名: ' + info.partName : '',
                     info.referenceNo ? '照合番号: ' + info.referenceNo : '',
-                    info.price ? '希望価格: ' + info.price : '',
-                    info.partNo ? '部品番号: ' + info.partNo : '',
                   ].filter(Boolean).join(' / '),
                 }))
               }
@@ -885,6 +977,19 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </div>
+
+            <div className="settings-section-title">アカウント</div>
+            <div className="settings-section">
+              <div className="settings-row" style={{ cursor: 'default' }}>
+                <span className="settings-row-icon">👤</span>
+                <span className="settings-row-label" style={{ fontSize: 13 }}>{session?.user?.email || '—'}</span>
+              </div>
+              <div className="settings-row" onClick={onLogout}>
+                <span className="settings-row-icon">🚪</span>
+                <span className="settings-row-label" style={{ color: 'var(--danger)' }}>ログアウト</span>
+                <span className="settings-row-chevron">›</span>
+              </div>
             </div>
 
             <div className="settings-section-title">アプリ情報</div>

@@ -1308,3 +1308,72 @@ body {
 }
 
 .scan-btn:active { opacity: .6; }
+
+/* ===== Login Screen ===== */
+.login-screen {
+  min-height: 100vh; min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+}
+
+.login-logo {
+  width: 80px; height: 80px;
+  border-radius: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 16px rgba(0,122,255,.2);
+}
+
+.login-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  font-size: 15px;
+  color: var(--text2);
+  margin-bottom: 28px;
+}
+
+.login-form {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  text-align: left;
+}
+
+.login-form .field { margin-bottom: 16px; }
+
+.login-error {
+  font-size: 13px;
+  color: var(--danger);
+  background: var(--danger-light);
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 17px;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+.login-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
