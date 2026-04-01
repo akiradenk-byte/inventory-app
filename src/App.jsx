@@ -233,6 +233,10 @@ function AppMain({ session, onLogout }) {
   // Part info fetching
   const [fetchingPart, setFetchingPart] = useState(false)
 
+  // AI image analysis
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  const aiImageInputRef = useRef(null)
+
   // Stocktake
   const [stocktakeMode, setStocktakeMode] = useState(false)
   const [confirmedIds, setConfirmedIds] = useState(new Set())
@@ -435,6 +439,52 @@ function AppMain({ session, onLogout }) {
     setImageFile(file)
     setImagePreview(URL.createObjectURL(file))
     e.target.value = ''
+  }
+
+  const handleAiAnalyze = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setAiAnalyzing(true)
+
+    // Set image preview
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+
+    try {
+      // Convert to base64
+      const buf = await file.arrayBuffer()
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      const mediaType = file.type || 'image/jpeg'
+
+      const apiBase = import.meta.env.DEV ? '' : ''
+      const resp = await fetch(`${apiBase}/api/analyze-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, mediaType }),
+      })
+      const data = await resp.json()
+      if (data.error) { alert('AI解析エラー: ' + data.error); setAiAnalyzing(false); return }
+
+      // Auto-fill form
+      const itemName = [data.product_name, data.part_number].filter(Boolean).join(' ')
+      const noteLines = [
+        data.part_name ? '部品名: ' + data.part_name : '',
+        data.reference_number ? '照合番号: ' + data.reference_number : '',
+        data.memo || '',
+      ].filter(Boolean).join(' / ')
+
+      setForm(f => ({
+        ...f,
+        name: itemName || f.name,
+        ...(data.price > 0 ? { price: data.price } : {}),
+        note: noteLines ? (f.note ? f.note + '\n' + noteLines : noteLines) : f.note,
+        ...(data.manufacturer && categories.includes(data.manufacturer) ? { cat: data.manufacturer } : {}),
+      }))
+    } catch (err) {
+      alert('AI解析に失敗しました: ' + (err.message || err))
+    }
+    setAiAnalyzing(false)
   }
 
   const saveItem = async () => {
@@ -1210,6 +1260,13 @@ function AppMain({ session, onLogout }) {
                   📷 タップして画像を選択
                 </button>
               )}
+            </div>
+
+            <div className="field">
+              <input ref={aiImageInputRef} type="file" accept="image/*" capture="environment" onChange={handleAiAnalyze} style={{ display: 'none' }} />
+              <button type="button" className="ai-analyze-btn" onClick={() => aiImageInputRef.current?.click()} disabled={aiAnalyzing}>
+                {aiAnalyzing ? '🔄 AI解析中...' : '📸 AI読取'}
+              </button>
             </div>
 
             <div className="field">

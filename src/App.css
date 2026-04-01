@@ -692,6 +692,22 @@ body {
 
 .image-upload-btn:active { border-color: var(--primary); color: var(--primary); }
 
+.ai-analyze-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #5856D6, #007AFF);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-analyze-btn:active:not(:disabled) { opacity: 0.8; }
+.ai-analyze-btn:disabled { opacity: 0.6; cursor: default; }
+
 .image-preview-wrap { position: relative; border-radius: 14px; overflow: hidden; }
 
 .image-preview {
