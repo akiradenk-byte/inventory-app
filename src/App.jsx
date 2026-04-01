@@ -136,15 +136,44 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s)
-      setAuthLoading(false)
-    })
+    // 古いService Workerをクリーンアップ（過去のPWAキャッシュ対策）
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(r => r.unregister())
+      })
+    }
+
+    let mounted = true
+
+    // セッション初期化: onAuthStateChangeを先にセット → getSessionで初期値取得
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s)
-      if (!s) setAuthLoading(false)
+      if (mounted) {
+        setSession(s)
+        setAuthLoading(false)
+      }
     })
-    return () => subscription.unsubscribe()
+
+    // getSession で初期セッションを取得（onAuthStateChange の INITIAL_SESSION イベントが
+    // 発火しないケースのフォールバック）
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (mounted) {
+        setSession(s)
+        setAuthLoading(false)
+      }
+    }).catch(() => {
+      if (mounted) setAuthLoading(false)
+    })
+
+    // タイムアウト: 5秒以内にauth状態が確定しなければローディングを解除
+    const timeout = setTimeout(() => {
+      if (mounted && authLoading) setAuthLoading(false)
+    }, 5000)
+
+    return () => {
+      mounted = false
+      clearTimeout(timeout)
+      subscription.unsubscribe()
+    }
   }, [])
 
   const handleLogout = async () => {
