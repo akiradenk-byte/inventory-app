@@ -441,27 +441,42 @@ function AppMain({ session, onLogout }) {
     e.target.value = ''
   }
 
+  const resizeAndConvert = (file, maxSize = 1024) => new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxSize || height > maxSize) {
+        const ratio = Math.min(maxSize / width, maxSize / height)
+        width = Math.round(width * ratio)
+        height = Math.round(height * ratio)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
+      const base64 = dataUrl.split(',')[1]
+      canvas.toBlob(blob => resolve({ base64, blob }), 'image/jpeg', 0.8)
+    }
+    img.src = URL.createObjectURL(file)
+  })
+
   const handleAiAnalyze = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
     setAiAnalyzing(true)
 
-    // Set image preview
-    setImageFile(file)
-    setImagePreview(URL.createObjectURL(file))
-
     try {
-      // Convert to base64
-      const buf = await file.arrayBuffer()
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
-      const mediaType = file.type || 'image/jpeg'
+      // Resize and convert to base64
+      const { base64, blob } = await resizeAndConvert(file)
+      const resizedFile = new File([blob], file.name, { type: 'image/jpeg' })
+      setImageFile(resizedFile)
+      setImagePreview(URL.createObjectURL(resizedFile))
 
-      const apiBase = import.meta.env.DEV ? '' : ''
-      const resp = await fetch(`${apiBase}/api/analyze-image`, {
+      const resp = await fetch('/api/analyze-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mediaType }),
+        body: JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
       })
       const data = await resp.json()
       if (data.error) { alert('AI解析エラー: ' + data.error); setAiAnalyzing(false); return }
