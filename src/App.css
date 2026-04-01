@@ -946,6 +946,52 @@ body {
 
 .master-loc { font-size: 13px; padding: 2px 10px; }
 
+.loc-sortable {
+  flex-direction: column;
+  gap: 4px;
+}
+.loc-sort-item {
+  border-radius: 10px !important;
+  padding: 6px 8px !important;
+  width: 100%;
+  box-sizing: border-box;
+}
+.loc-sort-handle {
+  color: var(--text3);
+  font-size: 16px;
+  line-height: 1;
+  padding-right: 4px;
+  user-select: none;
+}
+.loc-sort-btns {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.loc-sort-btn {
+  border: none;
+  background: var(--card);
+  color: var(--primary);
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.loc-sort-btn:disabled {
+  color: var(--text3);
+  opacity: 0.4;
+  cursor: default;
+}
+.loc-sort-btn:active:not(:disabled) {
+  background: var(--primary);
+  color: #fff;
+}
+
 .master-empty {
   font-size: 13px;
   color: var(--text3);

@@ -255,11 +255,11 @@ function AppMain({ session, onLogout }) {
     const [{ data: itemsData }, { data: catsData }, { data: locsData }] = await Promise.all([
       supabase.from('items').select('*').order('created_at', { ascending: false }),
       supabase.from('categories').select('*').order('name'),
-      supabase.from('locations').select('*').order('name'),
+      supabase.from('locations').select('*').order('sort_order').order('name'),
     ])
     setItems(itemsData || [])
     setCategories((catsData || []).map(c => c.name))
-    setLocations((locsData || []).map(l => l.name))
+    setLocations((locsData || []).map(l => ({ name: l.name, sort_order: l.sort_order ?? 0 })))
     setLoading(false)
   }, [])
 
@@ -502,13 +502,28 @@ function AppMain({ session, onLogout }) {
     await supabase.from('categories').delete().eq('name', name); fetchAll()
   }
   const addLoc = async () => {
-    if (!newLoc.trim() || locations.includes(newLoc.trim())) return
-    await supabase.from('locations').insert({ name: newLoc.trim() })
+    if (!newLoc.trim() || locations.some(l => l.name === newLoc.trim())) return
+    const maxOrder = locations.reduce((m, l) => Math.max(m, l.sort_order), -1)
+    await supabase.from('locations').insert({ name: newLoc.trim(), sort_order: maxOrder + 1 })
     setNewLoc(''); fetchAll()
   }
   const delLoc = async (name) => {
     if (!confirm('保管場所「' + name + '」を削除しますか？')) return
     await supabase.from('locations').delete().eq('name', name); fetchAll()
+  }
+  const moveLoc = async (index, direction) => {
+    const swapIdx = index + direction
+    if (swapIdx < 0 || swapIdx >= locations.length) return
+    const a = locations[index], b = locations[swapIdx]
+    const newLocs = [...locations]
+    newLocs[index] = { ...b, sort_order: a.sort_order }
+    newLocs[swapIdx] = { ...a, sort_order: b.sort_order }
+    newLocs.sort((x, y) => x.sort_order - y.sort_order)
+    setLocations(newLocs)
+    await Promise.all([
+      supabase.from('locations').update({ sort_order: a.sort_order }).eq('name', b.name),
+      supabase.from('locations').update({ sort_order: b.sort_order }).eq('name', a.name),
+    ])
   }
 
   const exportCSV = () => {
@@ -692,7 +707,7 @@ function AppMain({ session, onLogout }) {
               </select>
               <select className="filter-select" value={locFilter} onChange={e => { setLocFilter(e.target.value); setPage(0) }}>
                 <option value="">全ロケーション</option>
-                {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                {locations.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
               </select>
               <select className="filter-select" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}>
                 <option value="">全ステータス</option>
@@ -935,8 +950,8 @@ function AppMain({ session, onLogout }) {
                   <select value={stocktakeLocFilter} onChange={e => setStocktakeLocFilter(e.target.value)}>
                     <option value="">全ロケーション ({unconfirmedItems.length}件未確認)</option>
                     {locations.map(l => {
-                      const cnt = items.filter(i => !confirmedIds.has(i.id) && i.loc === l).length
-                      return <option key={l} value={l}>{l} ({cnt}件)</option>
+                      const cnt = items.filter(i => !confirmedIds.has(i.id) && i.loc === l.name).length
+                      return <option key={l.name} value={l.name}>{l.name} ({cnt}件)</option>
                     })}
                   </select>
                 </div>
@@ -1019,11 +1034,16 @@ function AppMain({ session, onLogout }) {
                     <input type="text" value={newLoc} onChange={e => setNewLoc(e.target.value)} placeholder="新しい保管場所名" onKeyDown={e => e.key === 'Enter' && addLoc()} />
                     <button className="btn sm primary" onClick={addLoc}>追加</button>
                   </div>
-                  <div className="master-list">
-                    {locations.map(l => (
-                      <div key={l} className="master-item">
-                        <span className="master-loc">{l}</span>
-                        <button className="del-x" onClick={() => delLoc(l)}>×</button>
+                  <div className="master-list loc-sortable">
+                    {locations.map((l, idx) => (
+                      <div key={l.name} className="master-item loc-sort-item">
+                        <span className="loc-sort-handle">≡</span>
+                        <span className="master-loc">{l.name}</span>
+                        <div className="loc-sort-btns">
+                          <button className="loc-sort-btn" disabled={idx === 0} onClick={() => moveLoc(idx, -1)}>↑</button>
+                          <button className="loc-sort-btn" disabled={idx === locations.length - 1} onClick={() => moveLoc(idx, 1)}>↓</button>
+                        </div>
+                        <button className="del-x" onClick={() => delLoc(l.name)}>×</button>
                       </div>
                     ))}
                     {locations.length === 0 && <div className="master-empty">保管場所がありません</div>}
@@ -1223,7 +1243,7 @@ function AppMain({ session, onLogout }) {
                 <label>ロケーション</label>
                 <select value={form.loc} onChange={e => setForm(f => ({ ...f, loc: e.target.value }))}>
                   <option value="">未指定</option>
-                  {locations.map(l => <option key={l} value={l}>{l}</option>)}
+                  {locations.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
                 </select>
               </div>
             </div>
