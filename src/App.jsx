@@ -116,7 +116,36 @@ export default function App() {
         setSearch(code)
         setPage(0)
       } else {
-        setForm(f => ({ ...f, bc: code }))
+        // 日立QRコード解析
+        const urlStr = code.trim()
+        let name = ''
+        let cat = ''
+
+        try {
+          const url = new URL(urlStr.toLowerCase().startsWith('http') ? urlStr : 'http://' + urlStr)
+          const hostname = url.hostname.toLowerCase()
+
+          if (hostname.includes('hitachi-gls') || hostname.includes('hitachi-cm')) {
+            const params = url.searchParams
+            // パラメータ名が大文字の場合にも対応
+            const pno = params.get('pno') || params.get('PNO') || params.get('Pno') || ''
+            const cno = params.get('cno') || params.get('CNO') || params.get('Cno') || ''
+
+            if (pno) {
+              name = pno.toUpperCase() + (cno ? ' ' + cno : '')
+              cat = 'HITACHI'
+            }
+          }
+        } catch (e) {
+          // URL解析失敗は無視（通常のバーコードとして扱う）
+        }
+
+        setForm(f => ({
+          ...f,
+          bc: code,
+          ...(name ? { name } : {}),
+          ...(cat ? { cat } : {}),
+        }))
       }
     } catch (err) {
       console.error('handleScan error:', err)
