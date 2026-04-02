@@ -1,5 +1,14 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
+
+const SCAN_FORMATS = [
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.CODE_39,
+  Html5QrcodeSupportedFormats.ITF,
+]
 
 export default function BarcodeScanner({ onScan, onClose, continuous = false }) {
   const scannerRef = useRef(null)
@@ -33,12 +42,21 @@ export default function BarcodeScanner({ onScan, onClose, continuous = false }) 
 
   useEffect(() => {
     let mounted = true
-    const scanner = new Html5Qrcode('barcode-reader')
+    const scanner = new Html5Qrcode('barcode-reader', { formatsToSupport: SCAN_FORMATS })
     scannerRef.current = scanner
 
     scanner.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 250, height: 150 } },
+      { facingMode: { exact: 'environment' } },
+      {
+        fps: 15,
+        qrbox: { width: 280, height: 180 },
+        aspectRatio: 1.777778,
+        videoConstraints: {
+          facingMode: { exact: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      },
       (decodedText) => {
         if (mounted) handleDetected(decodedText)
       },
