@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 
 const SCAN_FORMATS = [
@@ -14,6 +14,9 @@ export default function BarcodeScanner({ onScan, onClose, continuous = false }) 
   const scannerRef = useRef(null)
   const scannedRef = useRef(false)
   const runningRef = useRef(false)
+  const onScanRef = useRef(onScan)
+
+  useEffect(() => { onScanRef.current = onScan }, [onScan])
 
   const safeStop = async () => {
     if (scannerRef.current && runningRef.current) {
@@ -25,20 +28,6 @@ export default function BarcodeScanner({ onScan, onClose, continuous = false }) 
       }
     }
   }
-
-  const handleDetected = useCallback((decodedText) => {
-    if (scannedRef.current) return
-    scannedRef.current = true
-    if (continuous) {
-      // 連続スキャンモード: カメラを止めず、コールバックを呼んで2秒後に次のスキャンを受付
-      onScan(decodedText)
-      setTimeout(() => { scannedRef.current = false }, 2000)
-    } else {
-      safeStop().then(() => {
-        setTimeout(() => onScan(decodedText), 100)
-      })
-    }
-  }, [onScan, continuous])
 
   useEffect(() => {
     let mounted = true
@@ -58,11 +47,20 @@ export default function BarcodeScanner({ onScan, onClose, continuous = false }) 
         },
       },
       (decodedText) => {
-        if (mounted) handleDetected(decodedText)
+        if (!mounted || scannedRef.current) return
+        scannedRef.current = true
+        if (continuous) {
+          onScanRef.current(decodedText)
+          setTimeout(() => { scannedRef.current = false }, 2000)
+        } else {
+          safeStop().then(() => {
+            setTimeout(() => onScanRef.current(decodedText), 100)
+          })
+        }
       },
       () => {}
     ).then(() => {
-      runningRef.current = true
+      if (mounted) runningRef.current = true
     }).catch((err) => {
       console.error('カメラ起動エラー:', err)
     })
@@ -71,7 +69,7 @@ export default function BarcodeScanner({ onScan, onClose, continuous = false }) 
       mounted = false
       safeStop()
     }
-  }, [handleDetected])
+  }, [continuous])
 
   const handleClose = () => {
     safeStop().then(() => onClose())
