@@ -473,31 +473,54 @@ function AppMain({ session, onLogout }) {
       setImageFile(resizedFile)
       setImagePreview(URL.createObjectURL(resizedFile))
 
-      const resp = await fetch('/api/analyze-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
-      })
+      // 30秒タイムアウト付きでAPI呼び出し
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30000)
+      let resp
+      try {
+        resp = await fetch('/api/analyze-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timeout)
+      }
       const data = await resp.json()
       if (data.error) { alert('AI解析エラー: ' + data.error); setAiAnalyzing(false); return }
 
       // Auto-fill form
-      const itemName = [data.product_name, data.part_number].filter(Boolean).join(' ')
+      const itemName = data.product_name || ''
       const noteLines = [
         data.part_name ? '部品名: ' + data.part_name : '',
         data.reference_number ? '照合番号: ' + data.reference_number : '',
         data.memo || '',
       ].filter(Boolean).join(' / ')
 
+      // カテゴリ: manufacturer or category から既存カテゴリにマッチするものを探す
+      let matchedCat = ''
+      const catCandidates = [data.manufacturer, data.category].filter(Boolean)
+      for (const c of catCandidates) {
+        const exact = categories.find(cat => cat.toLowerCase() === c.toLowerCase())
+        if (exact) { matchedCat = exact; break }
+        const partial = categories.find(cat => cat.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(cat.toLowerCase()))
+        if (partial) { matchedCat = partial; break }
+      }
+
       setForm(f => ({
         ...f,
         name: itemName || f.name,
         ...(data.price > 0 ? { price: data.price } : {}),
         note: noteLines ? (f.note ? f.note + '\n' + noteLines : noteLines) : f.note,
-        ...(data.manufacturer && categories.includes(data.manufacturer) ? { cat: data.manufacturer } : {}),
+        ...(matchedCat ? { cat: matchedCat } : {}),
       }))
     } catch (err) {
-      alert('AI解析に失敗しました: ' + (err.message || err))
+      if (err.name === 'AbortError') {
+        alert('読み取りに失敗しました。手動で入力してください。（タイムアウト）')
+      } else {
+        alert('読み取りに失敗しました。手動で入力してください。')
+      }
     }
     setAiAnalyzing(false)
   }
@@ -1280,7 +1303,7 @@ function AppMain({ session, onLogout }) {
             <div className="field">
               <input ref={aiImageInputRef} type="file" accept="image/*" capture="environment" onChange={handleAiAnalyze} style={{ display: 'none' }} />
               <button type="button" className="ai-analyze-btn" onClick={() => aiImageInputRef.current?.click()} disabled={aiAnalyzing}>
-                {aiAnalyzing ? '🔄 AI解析中...' : '📸 AI読取'}
+                {aiAnalyzing ? '🤖 AI解析中...' : '📸 AI読取'}
               </button>
             </div>
 

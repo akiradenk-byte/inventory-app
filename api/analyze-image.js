@@ -11,17 +11,22 @@ export default async function handler(req, res) {
   const { image, mediaType } = req.body || {}
   if (!image) return res.status(400).json({ error: 'image (base64) is required' })
 
-  const prompt = `この画像は部品・商品のラベルまたは伝票です。以下の情報を読み取ってJSON形式で返してください：
+  const prompt = `この画像に写っている文字をすべて読み取ってください。
+読み取った文字から以下の情報を抽出してJSON形式で返してください。
+
 {
-  "product_name": "型番や品番（例: BW-DX120B）",
-  "part_number": "部品番号（例: 009）",
-  "part_name": "部品名（例: ツリボーブクミ）",
-  "price": 数値（例: 6050、読み取れない場合は0）,
-  "reference_number": "照合番号（あれば）",
-  "manufacturer": "メーカー名（わかれば）",
-  "memo": "その他読み取れた情報"
+  "product_name": "型番・品番（例: RAS-E40F2）。部品番号と組み合わせて「RAS-E40F2 003」のような形式にする",
+  "part_number": "部品番号（例: 003）",
+  "part_name": "部品名・DESCRIPTION（例: ツユサラクミ（フラップ ナシ）DRAINPAN）",
+  "price": 数値のみ（例: 6050。¥やカンマは除去。読み取れない場合は0）,
+  "reference_number": "照合番号・管理番号（あれば）",
+  "manufacturer": "メーカー名（HITACHI、日立、パナソニック、ダイキンなど。わかれば）",
+  "category": "補修部品、REPLACEMENT PARTSなどの記載があれば",
+  "memo": "上記に含まれないが重要と思われる情報（注文型式、その他の番号など）"
 }
-読み取れない項目は空文字またはnullにしてください。JSONのみを返してください。`
+
+読み取れない項目は空文字にしてください。
+JSONのみを返し、他のテキストは含めないでください。`
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
