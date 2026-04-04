@@ -275,9 +275,14 @@ function AppMain({ session, onLogout }) {
   useEffect(() => { fetchAll() }, [fetchAll])
 
   // Pull to refresh handlers
+  const touchStartX = useRef(0)
+  const pullActive = useRef(false)
+
   const handleTouchStart = (e) => {
     if (contentRef.current && contentRef.current.scrollTop === 0) {
       touchStartY.current = e.touches[0].clientY
+      touchStartX.current = e.touches[0].clientX
+      pullActive.current = false
     } else {
       touchStartY.current = 0
     }
@@ -285,14 +290,22 @@ function AppMain({ session, onLogout }) {
 
   const handleTouchMove = (e) => {
     if (!touchStartY.current) return
-    const diff = e.touches[0].clientY - touchStartY.current
-    if (diff > 0 && diff < 120) {
-      setPullDistance(diff)
+    const dy = e.touches[0].clientY - touchStartY.current
+    const dx = Math.abs(e.touches[0].clientX - touchStartX.current)
+    // Y方向の移動がX方向より大きい場合のみ発動
+    if (!pullActive.current) {
+      if (dy < 10) return
+      if (dx > dy) { touchStartY.current = 0; return }
+      pullActive.current = true
+    }
+    if (dy > 0) {
+      // ゴムバンド効果: 実際の移動量を0.4倍に
+      setPullDistance(dy * 0.4)
     }
   }
 
   const handleTouchEnd = async () => {
-    if (pullDistance > 60) {
+    if (pullDistance >= 120) {
       setRefreshing(true)
       setPullDistance(0)
       await fetchAll()
@@ -301,6 +314,7 @@ function AppMain({ session, onLogout }) {
       setPullDistance(0)
     }
     touchStartY.current = 0
+    pullActive.current = false
   }
 
   const getGroups = () => {
@@ -850,9 +864,13 @@ function AppMain({ session, onLogout }) {
       </div>
 
       {/* ===== Pull to Refresh Indicator ===== */}
-      {(pullDistance > 0 || refreshing) && (
-        <div className="pull-indicator" style={{ height: refreshing ? 40 : Math.min(pullDistance * 0.5, 40) }}>
-          {refreshing ? <div className="pull-spinner" /> : (pullDistance > 60 ? '↻ 離して更新' : '↓ 引いて更新')}
+      {(pullDistance > 60 || refreshing) && (
+        <div className="pull-indicator" style={{
+          height: refreshing ? 40 : Math.min(pullDistance - 60, 60),
+          opacity: refreshing ? 1 : Math.min((pullDistance - 60) / 60, 1),
+          color: pullDistance >= 120 ? 'var(--tint)' : 'var(--text3)',
+        }}>
+          {refreshing ? <div className="pull-spinner" /> : (pullDistance >= 120 ? '↑ 離して更新' : '↓ 引っ張って更新')}
         </div>
       )}
 
