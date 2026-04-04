@@ -305,7 +305,7 @@ function AppMain({ session, onLogout }) {
     try {
       const q = search.toLowerCase()
       const filtered = items.filter(i => {
-        if (q && !(i.name || '').toLowerCase().includes(q) && !(i.bc || '').toLowerCase().includes(q)) return false
+        if (q && !(i.name || '').toLowerCase().includes(q) && !(i.bc || '').toLowerCase().includes(q) && !(i.cat || '').toLowerCase().includes(q) && !(i.note || '').toLowerCase().includes(q) && !(i.loc || '').toLowerCase().includes(q)) return false
         if (catFilter && i.cat !== catFilter) return false
         if (locFilter && i.loc !== locFilter) return false
         if (statusFilter === 'instock' && !i.loc) return false
@@ -817,7 +817,7 @@ function AppMain({ session, onLogout }) {
                 <span className="search-icon">🔍</span>
                 <input
                   type="text"
-                  placeholder="物品名・バーコードで検索..."
+                  placeholder="物品名・バーコード・カテゴリ・メモで検索..."
                   value={search}
                   onChange={e => { setSearch(e.target.value); setPage(0) }}
                 />
@@ -1446,7 +1446,7 @@ function AppMain({ session, onLogout }) {
                 type="text"
                 value={stocktakeSearchQuery}
                 onChange={e => setStocktakeSearchQuery(e.target.value)}
-                placeholder="物品名・バーコードで検索..."
+                placeholder="物品名・バーコード・カテゴリ・メモで検索..."
                 autoFocus
               />
             </div>
