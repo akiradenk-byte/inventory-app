@@ -233,6 +233,9 @@ function AppMain({ session, onLogout }) {
   // Part info fetching
   const [fetchingPart, setFetchingPart] = useState(false)
 
+  // Scan toast
+  const [scanToast, setScanToast] = useState(null)
+
   // AI image analysis
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const aiImageInputRef = useRef(null)
@@ -354,65 +357,82 @@ function AppMain({ session, onLogout }) {
     try {
       setShowScanner(false)
       setFormHidden(false)
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+
       if (scanTarget === 'search') {
         setSearch(code)
         setPage(0)
         setActiveTab('home')
-      } else {
-        const urlStr = (code || '').trim()
-        let name = ''
-        let cat = ''
-        let note = ''
-
-        try {
-          const url = new URL(urlStr.toLowerCase().startsWith('http') ? urlStr : 'http://' + urlStr)
-          const hostname = url.hostname.toLowerCase()
-
-          if (hostname.includes('hitachi-gls') || hostname.includes('hitachi-cm')) {
-            const params = url.searchParams
-            const pno = params.get('pno') || params.get('PNO') || params.get('Pno') || ''
-            const cno = params.get('cno') || params.get('CNO') || params.get('Cno') || ''
-
-            if (pno) {
-              name = pno.toUpperCase() + (cno ? ' ' + cno : '')
-              cat = 'HITACHI'
-            }
-
-            fetchHitachiPartInfo(urlStr).then(info => {
-              if (info && (info.partName || info.referenceNo || info.price)) {
-                // 価格を数値に変換 (例: "¥6,050" → 6050)
-                let priceNum = 0
-                if (info.price) {
-                  const priceMatch = info.price.replace(/[¥￥,\s]/g, '').match(/\d+/)
-                  if (priceMatch) priceNum = parseInt(priceMatch[0], 10)
-                }
-                setForm(f => ({
-                  ...f,
-                  name: info.partName ? (pno.toUpperCase() + ' ' + info.partName) : f.name,
-                  ...(priceNum > 0 ? { price: priceNum } : {}),
-                  note: [
-                    info.partName ? '部品名: ' + info.partName : '',
-                    info.referenceNo ? '照合番号: ' + info.referenceNo : '',
-                  ].filter(Boolean).join(' / '),
-                }))
-              }
-            })
-          }
-        } catch (e) {}
-
-        setForm(f => ({
-          ...f,
-          bc: code,
-          ...(name ? { name } : {}),
-          ...(cat ? { cat } : {}),
-          ...(note ? { note } : {}),
-        }))
+        return
       }
+
+      // scanTarget === 'form' （スキャンタブから）
+      const urlStr = (code || '').trim()
+      let isHitachi = false
+
+      try {
+        const url = new URL(urlStr.toLowerCase().startsWith('http') ? urlStr : 'http://' + urlStr)
+        const hostname = url.hostname.toLowerCase()
+        if (hostname.includes('hitachi-gls') || hostname.includes('hitachi-cm')) {
+          isHitachi = true
+          const params = url.searchParams
+          const pno = params.get('pno') || params.get('PNO') || params.get('Pno') || ''
+          const cno = params.get('cno') || params.get('CNO') || params.get('Cno') || ''
+          const itemName = pno ? pno.toUpperCase() + (cno ? ' ' + cno : '') : ''
+
+          // フォーム初期化して日立情報をセット
+          setForm({ bc: code, name: itemName, cat: 'HITACHI', loc: '', price: 0, note: '', image_url: '', condition: '' })
+          setEditItem(null); setAddPreset(null); setImageFile(null); setImagePreview(null)
+          setShowAdd(true)
+          setScanToast({ ok: true, msg: '日立部品情報を取得中...' })
+
+          // 部品詳細を非同期で取得
+          fetchHitachiPartInfo(urlStr).then(info => {
+            if (info && (info.partName || info.referenceNo || info.price)) {
+              let priceNum = 0
+              if (info.price) {
+                const priceMatch = info.price.replace(/[¥￥,\s]/g, '').match(/\d+/)
+                if (priceMatch) priceNum = parseInt(priceMatch[0], 10)
+              }
+              setForm(f => ({
+                ...f,
+                name: info.partName ? (pno.toUpperCase() + ' ' + info.partName) : f.name,
+                ...(priceNum > 0 ? { price: priceNum } : {}),
+                note: [
+                  info.partName ? '部品名: ' + info.partName : '',
+                  info.referenceNo ? '照合番号: ' + info.referenceNo : '',
+                ].filter(Boolean).join(' / '),
+              }))
+              setScanToast({ ok: true, msg: '日立部品情報を取得しました' })
+            }
+            setTimeout(() => setScanToast(null), 3000)
+          }).catch(() => { setTimeout(() => setScanToast(null), 3000) })
+          return
+        }
+      } catch (e) {}
+
+      // 通常バーコード: 既存アイテム検索
+      const codeLower = code.toLowerCase()
+      const existing = items.find(i => i.bc && i.bc.toLowerCase() === codeLower)
+
+      if (existing) {
+        // 既存アイテム → 詳細表示
+        setDetailItem(existing)
+        setScanToast({ ok: true, msg: existing.name + ' が見つかりました' })
+      } else {
+        // 新規 → 登録フォームを開く
+        setForm({ bc: code, name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '', condition: '' })
+        setEditItem(null); setAddPreset(null); setImageFile(null); setImagePreview(null)
+        setShowAdd(true)
+        setScanToast({ ok: 'new', msg: '新規バーコード — 登録してください' })
+      }
+      setTimeout(() => setScanToast(null), 3000)
     } catch (err) {
       console.error('handleScan error:', err)
-      alert('スキャンエラー: ' + err.message)
+      setScanToast({ ok: false, msg: 'スキャンエラー: ' + (err.message || err) })
+      setTimeout(() => setScanToast(null), 3000)
     }
-  }, [scanTarget])
+  }, [scanTarget, items, categories])
 
   const handleScanClose = () => {
     setShowScanner(false)
@@ -1196,6 +1216,13 @@ function AppMain({ session, onLogout }) {
           <span className="tab-label">設定</span>
         </button>
       </div>
+
+      {/* ===== Scan Toast ===== */}
+      {scanToast && (
+        <div className={'global-toast' + (scanToast.ok === true ? ' ok' : scanToast.ok === 'new' ? ' info' : ' ng')} style={{ zIndex: 1300 }}>
+          {scanToast.ok === true ? '✓ ' : scanToast.ok === 'new' ? '📝 ' : '✗ '}{scanToast.msg}
+        </div>
+      )}
 
       {/* ===== Scanner Modal ===== */}
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />}
