@@ -715,19 +715,25 @@ function AppMain({ session, onLogout }) {
     )
 
     if (matched.length > 0) {
-      matched.forEach(i => confirmItem(i.id))
       const first = matched[0]
-      setScanHistory(prev => [first, ...prev.filter(h => h.id !== first.id)].slice(0, 5))
-      if (navigator.vibrate) navigator.vibrate(200)
-      setLastScanResult({ ok: true, name: first.name, count: matched.length, image_url: first.image_url })
+      const alreadyConfirmed = matched.every(i => confirmedIds.has(i.id))
+      if (alreadyConfirmed) {
+        if (navigator.vibrate) navigator.vibrate([300])
+        setLastScanResult({ ok: 'already', name: first.name })
+      } else {
+        matched.forEach(i => confirmItem(i.id))
+        setScanHistory(prev => [first, ...prev.filter(h => h.id !== first.id)].slice(0, 5))
+        if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+        setLastScanResult({ ok: true, name: first.name, count: matched.length, image_url: first.image_url })
+      }
     } else {
-      if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+      if (navigator.vibrate) navigator.vibrate([300])
       setLastScanResult({ ok: false, code: code.length > 40 ? code.slice(0, 40) + '...' : code })
     }
 
     if (lastScanTimerRef.current) clearTimeout(lastScanTimerRef.current)
-    lastScanTimerRef.current = setTimeout(() => setLastScanResult(null), 2500)
-  }, [items])
+    lastScanTimerRef.current = setTimeout(() => setLastScanResult(null), 3000)
+  }, [items, confirmedIds])
 
   const stocktakeSearchResults = stocktakeSearchQuery.length >= 1
     ? items.filter(i => {
@@ -1196,7 +1202,29 @@ function AppMain({ session, onLogout }) {
 
       {/* ===== Stocktake Scanner (continuous) ===== */}
       {stocktakeScanning && (
-        <BarcodeScanner continuous={true} onScan={handleStocktakeScan} onClose={() => setStocktakeScanning(false)} />
+        <>
+          <BarcodeScanner continuous={true} onScan={handleStocktakeScan} onClose={() => setStocktakeScanning(false)} />
+          <div className="stocktake-scanner-overlay">
+            {lastScanResult && (
+              <div className={'stocktake-scanner-toast' + (lastScanResult.ok === true ? ' ok' : lastScanResult.ok === 'already' ? ' already' : ' ng')}>
+                {lastScanResult.ok === true && <span>✓ {lastScanResult.name} 確認済！</span>}
+                {lastScanResult.ok === 'already' && <span>⚠ {lastScanResult.name} は確認済です</span>}
+                {lastScanResult.ok === false && <span>✗ 登録されていないバーコードです</span>}
+              </div>
+            )}
+            <div className="stocktake-scanner-bottom">
+              <div className="stocktake-scanner-counter">確認済: {confirmedIds.size} / {items.length} 件</div>
+              {scanHistory.length > 0 && (
+                <div className="stocktake-scanner-history">
+                  {scanHistory.slice(0, 5).map((h, i) => (
+                    <div key={h.id + '-' + i} className="stocktake-scanner-history-item">✓ {h.name}</div>
+                  ))}
+                </div>
+              )}
+              <button className="btn stocktake-scanner-done" onClick={() => setStocktakeScanning(false)}>スキャン完了</button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* ===== Image Viewer (Fullscreen) ===== */}
