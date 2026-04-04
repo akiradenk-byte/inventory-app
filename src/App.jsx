@@ -380,8 +380,16 @@ function AppMain({ session, onLogout }) {
           const cno = params.get('cno') || params.get('CNO') || params.get('Cno') || ''
           const itemName = pno ? pno.toUpperCase() + (cno ? ' ' + cno : '') : ''
 
-          // フォーム初期化して日立情報をセット
-          setForm({ bc: code, name: itemName, cat: 'HITACHI', loc: '', price: 0, note: '', image_url: '', condition: '' })
+          // 既に入力済みの場合は上書き確認
+          const hasExistingData = form.name || form.note || (form.price > 0)
+          const shouldOverwrite = !hasExistingData || window.confirm('AI読み取り済みの情報を上書きしますか？\n「いいえ」を選ぶとバーコード欄のみ更新します。')
+
+          if (shouldOverwrite) {
+            setForm(f => ({ ...f, bc: code, name: itemName, cat: 'HITACHI' }))
+          } else {
+            // バーコード欄のみ更新
+            setForm(f => ({ ...f, bc: code }))
+          }
           setEditItem(null); setAddPreset(null); setImageFile(null); setImagePreview(null)
           setShowAdd(true)
           setScanToast({ ok: true, msg: '日立部品情報を取得中...' })
@@ -394,15 +402,28 @@ function AppMain({ session, onLogout }) {
                 const priceMatch = info.price.replace(/[¥￥,\s]/g, '').match(/\d+/)
                 if (priceMatch) priceNum = parseInt(priceMatch[0], 10)
               }
-              setForm(f => ({
-                ...f,
-                name: info.partName ? (pno.toUpperCase() + ' ' + info.partName) : f.name,
-                ...(priceNum > 0 ? { price: priceNum } : {}),
-                note: [
-                  info.partName ? '部品名: ' + info.partName : '',
-                  info.referenceNo ? '照合番号: ' + info.referenceNo : '',
-                ].filter(Boolean).join(' / '),
-              }))
+              if (shouldOverwrite) {
+                setForm(f => ({
+                  ...f,
+                  name: info.partName ? (pno.toUpperCase() + ' ' + info.partName) : f.name,
+                  ...(priceNum > 0 ? { price: priceNum } : {}),
+                  note: [
+                    info.partName ? '部品名: ' + info.partName : '',
+                    info.referenceNo ? '照合番号: ' + info.referenceNo : '',
+                  ].filter(Boolean).join(' / '),
+                }))
+              } else {
+                // 空のフィールドだけ自動入力
+                setForm(f => ({
+                  ...f,
+                  name: f.name || (info.partName ? (pno.toUpperCase() + ' ' + info.partName) : ''),
+                  ...(!f.price && priceNum > 0 ? { price: priceNum } : {}),
+                  note: f.note || [
+                    info.partName ? '部品名: ' + info.partName : '',
+                    info.referenceNo ? '照合番号: ' + info.referenceNo : '',
+                  ].filter(Boolean).join(' / '),
+                }))
+              }
               setScanToast({ ok: true, msg: '日立部品情報を取得しました' })
             }
             setTimeout(() => setScanToast(null), 3000)
@@ -420,9 +441,14 @@ function AppMain({ session, onLogout }) {
         setDetailItem(existing)
         setScanToast({ ok: true, msg: existing.name + ' が見つかりました' })
       } else {
-        // 新規 → 登録フォームを開く
-        setForm({ bc: code, name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '', condition: '' })
-        setEditItem(null); setAddPreset(null); setImageFile(null); setImagePreview(null)
+        // 新規 → バーコード欄のみ更新（既存入力を保持）
+        setForm(f => ({
+          ...f,
+          bc: code,
+          // 空のフィールドだけデフォルト値を設定
+          cat: f.cat || categories[0] || '',
+        }))
+        setEditItem(null); setAddPreset(null)
         setShowAdd(true)
         setScanToast({ ok: 'new', msg: '新規バーコード — 登録してください' })
       }
@@ -432,7 +458,7 @@ function AppMain({ session, onLogout }) {
       setScanToast({ ok: false, msg: 'スキャンエラー: ' + (err.message || err) })
       setTimeout(() => setScanToast(null), 3000)
     }
-  }, [scanTarget, items, categories])
+  }, [scanTarget, items, categories, form])
 
   const handleScanClose = () => {
     setShowScanner(false)
