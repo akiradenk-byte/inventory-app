@@ -1593,3 +1593,100 @@ body {
 }
 
 .login-switch:active { opacity: .6; }
+
+/* ===== Help Guide ===== */
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.help-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: .5px solid var(--separator);
+  flex-shrink: 0;
+}
+.help-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+.help-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 16px 40px;
+}
+.help-section {
+  background: #fff;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  box-shadow: 0 0.5px 2px rgba(0,0,0,.06);
+}
+.help-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.help-section-header:active {
+  background: rgba(0,0,0,.04);
+}
+.help-section-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.help-section-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+.help-section-chevron {
+  font-size: 11px;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.help-section-body {
+  padding: 0 16px 16px 46px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text2);
+}
+.help-section-body p {
+  margin: 0 0 8px;
+}
+.help-section-body ul,
+.help-section-body ol {
+  margin: 0;
+  padding-left: 20px;
+}
+.help-section-body li {
+  margin-bottom: 4px;
+}
+.help-faq-item {
+  margin-bottom: 12px;
+}
+.help-faq-q {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.help-faq-a {
+  color: var(--text2);
+  padding-left: 8px;
+  border-left: 2px solid var(--separator);
+}

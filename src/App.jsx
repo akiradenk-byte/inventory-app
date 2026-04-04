@@ -226,6 +226,8 @@ function AppMain({ session, onLogout }) {
 
   // Detail modal
   const [detailItem, setDetailItem] = useState(null)
+  const [showHelp, setShowHelp] = useState(false)
+  const [helpOpen, setHelpOpen] = useState({})
 
   // Fullscreen image viewer
   const [viewerImage, setViewerImage] = useState(null)
@@ -1186,6 +1188,15 @@ function AppMain({ session, onLogout }) {
               </div>
             </div>
 
+            <div className="settings-section-title">サポート</div>
+            <div className="settings-section">
+              <div className="settings-row" onClick={() => setShowHelp(true)}>
+                <span className="settings-row-icon">📖</span>
+                <span className="settings-row-label">使い方ガイド</span>
+                <span className="settings-row-chevron">›</span>
+              </div>
+            </div>
+
             <div className="settings-section-title">アプリ情報</div>
             <div className="settings-section">
               <div className="settings-row" style={{ cursor: 'default' }}>
@@ -1478,6 +1489,133 @@ function AppMain({ session, onLogout }) {
               {stocktakeSearchQuery.length === 0 && (
                 <div className="stocktake-no-result">物品名やバーコード番号を入力してください</div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Help Guide Modal ===== */}
+      {showHelp && (
+        <div className="help-overlay">
+          <div className="help-page">
+            <div className="help-header">
+              <h2>📖 使い方ガイド</h2>
+              <button className="modal-close" onClick={() => setShowHelp(false)}>✕</button>
+            </div>
+            <div className="help-body">
+              {[
+                { key: 'intro', icon: '🏁', title: 'はじめに', content: (
+                  <div>
+                    <p>このアプリでは以下のことができます：</p>
+                    <ul>
+                      <li><b>在庫管理</b> — 物品の登録・編集・削除・検索</li>
+                      <li><b>バーコードスキャン</b> — QRコード/バーコードで素早く登録・検索</li>
+                      <li><b>AI画像読み取り</b> — 写真から型番・価格などを自動入力</li>
+                      <li><b>棚卸し</b> — スキャンや手動検索で在庫を確認</li>
+                    </ul>
+                    <p style={{ marginTop: 12 }}><b>画面構成（4つのタブ）：</b></p>
+                    <ul>
+                      <li>🏠 <b>ホーム</b> — 物品一覧・検索・フィルター</li>
+                      <li>📷 <b>スキャン</b> — バーコードスキャンで新規登録</li>
+                      <li>📋 <b>棚卸し</b> — 棚卸しモードで在庫確認</li>
+                      <li>⚙️ <b>設定</b> — カテゴリ・保管場所の管理</li>
+                    </ul>
+                  </div>
+                )},
+                { key: 'register', icon: '📝', title: '物品を登録する', content: (
+                  <ol>
+                    <li><b>「+」ボタン</b>またはスキャンタブから新規登録フォームを開きます</li>
+                    <li><b>QRコード/バーコードスキャン</b> — スキャンタブでカメラアイコンをタップし、コードを読み取ると自動入力されます</li>
+                    <li><b>AI画像読み取り</b> — 新規登録フォームで写真を撮影すると、AIが型番・部品名・価格などを自動で読み取ります</li>
+                    <li><b>手動入力</b> — 物品名、カテゴリ、保管場所、単価、メモを手入力します</li>
+                    <li><b>画像登録</b> — フォーム上部のカメラアイコンから物品の写真を撮影・添付できます</li>
+                  </ol>
+                )},
+                { key: 'scan', icon: '📷', title: 'QRコードスキャン', content: (
+                  <div>
+                    <ol>
+                      <li>スキャンタブのカメラアイコンをタップ</li>
+                      <li>QRコード/バーコードにかざすと自動で読み取り</li>
+                      <li>日立部品QRコードの場合は型番・部品名・価格が自動入力されます</li>
+                    </ol>
+                    <p style={{ marginTop: 8, color: 'var(--text3)', fontSize: 13 }}>💡 読み取れない場合はAI画像読み取りをお試しください</p>
+                  </div>
+                )},
+                { key: 'ai', icon: '🤖', title: 'AI画像読み取り', content: (
+                  <div>
+                    <ol>
+                      <li>新規登録フォームの画像エリアで写真を撮影</li>
+                      <li>撮影後、自動でAIが文字を解析します</li>
+                      <li>型番、部品名、価格などが自動入力されます</li>
+                    </ol>
+                    <p style={{ marginTop: 8, color: 'var(--text3)', fontSize: 13 }}>💡 読み取り精度が低い場合は、明るい場所で文字が鮮明に写るよう撮影してください。必要に応じて手動で修正できます。</p>
+                  </div>
+                )},
+                { key: 'search', icon: '🔍', title: '物品を検索・閲覧する', content: (
+                  <ul>
+                    <li><b>検索バー</b> — 物品名・バーコード・カテゴリ・メモ・保管場所で検索できます</li>
+                    <li><b>フィルター</b> — カテゴリ、ロケーション、ステータスで絞り込み</li>
+                    <li><b>物品をタップ</b> — 展開して個別アイテムを表示</li>
+                    <li><b>「詳細」ボタン</b> — 画像・メモ・バーコードなど全情報を表示</li>
+                  </ul>
+                )},
+                { key: 'edit', icon: '✏️', title: '物品を編集・削除する', content: (
+                  <ul>
+                    <li>展開した行の<b>「編集」</b>ボタンで編集フォームを開きます</li>
+                    <li><b>「削除」</b>ボタンで削除（確認ダイアログあり）</li>
+                    <li>詳細モーダルからも編集・削除が可能です</li>
+                  </ul>
+                )},
+                { key: 'stocktake', icon: '📋', title: '棚卸し', content: (
+                  <ol>
+                    <li>棚卸しタブをタップして<b>棚卸しモードを開始</b></li>
+                    <li><b>「スキャンで確認」</b> → QRコードをスキャンして確認済みにする</li>
+                    <li>スキャンできない場合は<b>「手動検索」</b>で物品名を検索して確認</li>
+                    <li><b>未確認リスト</b>から直接チェックも可能</li>
+                    <li><b>進捗バー</b>で確認状況をリアルタイムに確認</li>
+                    <li><b>「棚卸し終了」</b>で結果レポートを表示</li>
+                  </ol>
+                )},
+                { key: 'settings', icon: '⚙️', title: '設定', content: (
+                  <ul>
+                    <li><b>カテゴリ管理</b> — カテゴリの追加・削除</li>
+                    <li><b>保管場所管理</b> — 保管場所の追加・削除・並べ替え</li>
+                    <li><b>CSV出力</b> — 在庫データをCSVファイルでエクスポート</li>
+                    <li><b>ログアウト</b> — アカウントからログアウト</li>
+                  </ul>
+                )},
+                { key: 'faq', icon: '❓', title: 'よくある質問（FAQ）', content: (
+                  <div className="help-faq">
+                    <div className="help-faq-item">
+                      <div className="help-faq-q">Q: スキャンが反応しない</div>
+                      <div className="help-faq-a">Safariで開いているか確認し、カメラの使用許可が有効になっているか確認してください。</div>
+                    </div>
+                    <div className="help-faq-item">
+                      <div className="help-faq-q">Q: AI読取が失敗する</div>
+                      <div className="help-faq-a">明るい場所で、文字が鮮明に写るように撮影してください。ブレや影があると精度が下がります。</div>
+                    </div>
+                    <div className="help-faq-item">
+                      <div className="help-faq-q">Q: データが表示されない</div>
+                      <div className="help-faq-a">画面を下に引っ張って更新するか、アプリを再読み込みしてください。</div>
+                    </div>
+                    <div className="help-faq-item">
+                      <div className="help-faq-q">Q: iPhoneのホーム画面に追加したい</div>
+                      <div className="help-faq-a">Safariの共有ボタン（□↑）をタップし、「ホーム画面に追加」を選択してください。</div>
+                    </div>
+                  </div>
+                )},
+              ].map(section => (
+                <div key={section.key} className="help-section">
+                  <div className="help-section-header" onClick={() => setHelpOpen(h => ({ ...h, [section.key]: !h[section.key] }))}>
+                    <span className="help-section-icon">{section.icon}</span>
+                    <span className="help-section-title">{section.title}</span>
+                    <span className="help-section-chevron">{helpOpen[section.key] ? '▼' : '▶'}</span>
+                  </div>
+                  {helpOpen[section.key] && (
+                    <div className="help-section-body">{section.content}</div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
