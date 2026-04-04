@@ -380,21 +380,18 @@ function AppMain({ session, onLogout }) {
           const cno = params.get('cno') || params.get('CNO') || params.get('Cno') || ''
           const itemName = pno ? pno.toUpperCase() + (cno ? ' ' + cno : '') : ''
 
-          // 既に入力済みの場合は上書き確認
-          const hasExistingData = form.name || form.note || (form.price > 0)
-          const shouldOverwrite = !hasExistingData || window.confirm('AI読み取り済みの情報を上書きしますか？\n「いいえ」を選ぶとバーコード欄のみ更新します。')
-
-          if (shouldOverwrite) {
-            setForm(f => ({ ...f, bc: code, name: itemName, cat: 'HITACHI' }))
-          } else {
-            // バーコード欄のみ更新
-            setForm(f => ({ ...f, bc: code }))
-          }
+          // 既存入力を保持し、空のフィールドだけ自動入力
+          setForm(f => ({
+            ...f,
+            bc: code,
+            name: f.name || itemName,
+            cat: f.cat || 'HITACHI',
+          }))
           setEditItem(null); setAddPreset(null); setImageFile(null); setImagePreview(null)
           setShowAdd(true)
           setScanToast({ ok: true, msg: '日立部品情報を取得中...' })
 
-          // 部品詳細を非同期で取得
+          // 部品詳細を非同期で取得（空フィールドのみ自動入力）
           fetchHitachiPartInfo(urlStr).then(info => {
             if (info && (info.partName || info.referenceNo || info.price)) {
               let priceNum = 0
@@ -402,28 +399,15 @@ function AppMain({ session, onLogout }) {
                 const priceMatch = info.price.replace(/[¥￥,\s]/g, '').match(/\d+/)
                 if (priceMatch) priceNum = parseInt(priceMatch[0], 10)
               }
-              if (shouldOverwrite) {
-                setForm(f => ({
-                  ...f,
-                  name: info.partName ? (pno.toUpperCase() + ' ' + info.partName) : f.name,
-                  ...(priceNum > 0 ? { price: priceNum } : {}),
-                  note: [
-                    info.partName ? '部品名: ' + info.partName : '',
-                    info.referenceNo ? '照合番号: ' + info.referenceNo : '',
-                  ].filter(Boolean).join(' / '),
-                }))
-              } else {
-                // 空のフィールドだけ自動入力
-                setForm(f => ({
-                  ...f,
-                  name: f.name || (info.partName ? (pno.toUpperCase() + ' ' + info.partName) : ''),
-                  ...(!f.price && priceNum > 0 ? { price: priceNum } : {}),
-                  note: f.note || [
-                    info.partName ? '部品名: ' + info.partName : '',
-                    info.referenceNo ? '照合番号: ' + info.referenceNo : '',
-                  ].filter(Boolean).join(' / '),
-                }))
-              }
+              setForm(f => ({
+                ...f,
+                name: f.name || (info.partName ? (pno.toUpperCase() + ' ' + info.partName) : ''),
+                ...(!f.price && priceNum > 0 ? { price: priceNum } : {}),
+                note: f.note || [
+                  info.partName ? '部品名: ' + info.partName : '',
+                  info.referenceNo ? '照合番号: ' + info.referenceNo : '',
+                ].filter(Boolean).join(' / '),
+              }))
               setScanToast({ ok: true, msg: '日立部品情報を取得しました' })
             }
             setTimeout(() => setScanToast(null), 3000)
@@ -458,7 +442,7 @@ function AppMain({ session, onLogout }) {
       setScanToast({ ok: false, msg: 'スキャンエラー: ' + (err.message || err) })
       setTimeout(() => setScanToast(null), 3000)
     }
-  }, [scanTarget, items, categories, form])
+  }, [scanTarget, items, categories])
 
   const handleScanClose = () => {
     setShowScanner(false)
