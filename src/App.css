@@ -414,26 +414,27 @@ body {
 .detail-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px 10px 56px;
+  gap: 8px;
+  padding: 8px 12px 8px 56px;
   background: var(--bg);
   border-bottom: .5px solid var(--separator);
-  min-height: 44px;
-  cursor: pointer;
+  min-height: 40px;
 }
 
-.detail-card:active { background: rgba(0,0,0,.06); }
 .detail-card:last-child { border-bottom: none; }
 
-.detail-card .item-info {
-  font-size: 13px;
+.detail-loc {
   flex: 1;
   min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
-.detail-card .loc-pill,
-.detail-card .price {
+.detail-price {
   flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text2);
   white-space: nowrap;
 }
 .detail-card .action-cell {

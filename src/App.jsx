@@ -933,13 +933,11 @@ function AppMain({ session, onLogout }) {
                       </div>
                     </div>,
                     ...(isOpen ? (g.items || []).map(i => (
-                      <div key={i.id || Math.random()} className="detail-card" onClick={() => openDetail(i)}>
-                        <div className="item-info">
-                          <div className="detail-id">{'ID: ' + shortId(i.id) + '...'}  <span className="loc-pill">{i.loc || '未設定'}</span></div>
-                          {i.note && <div className="detail-note">{'📝 ' + i.note}</div>}
-                          <div className="price">{'¥' + (i.price || 0).toLocaleString()}</div>
-                        </div>
+                      <div key={i.id || Math.random()} className="detail-card">
+                        <span className="detail-loc">{'📍' + (i.loc || '未設定')}</span>
+                        <span className="detail-price">{'¥' + (i.price || 0).toLocaleString()}</span>
                         <div className="action-cell">
+                          <button className="btn sm" onClick={e => { e.stopPropagation(); openDetail(i) }}>詳細</button>
                           <button className="btn sm" onClick={e => { e.stopPropagation(); openEdit(i) }}>編集</button>
                           <button className="btn sm danger" onClick={e => { e.stopPropagation(); delItem(i.id) }}>削除</button>
                         </div>
