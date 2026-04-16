@@ -631,6 +631,23 @@ body {
 
 .modal-actions .btn { flex: 1; }
 
+.submit-success-msg {
+  width: 100%;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #085041;
+  background: #E1F5EE;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 4px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ===== Form Fields ===== */
 .field { margin-bottom: 14px; }
 
