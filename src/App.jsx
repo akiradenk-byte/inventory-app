@@ -205,6 +205,10 @@ function AppMain({ session, onLogout }) {
   // Tab navigation
   const [activeTab, setActiveTab] = useState('home')
 
+  // Trash bin
+  const [trashItems, setTrashItems] = useState([])
+  const [loadingTrash, setLoadingTrash] = useState(false)
+
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
@@ -266,7 +270,7 @@ function AppMain({ session, onLogout }) {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     const [{ data: itemsData }, { data: catsData }, { data: locsData }] = await Promise.all([
-      supabase.from('items').select('*').order('created_at', { ascending: false }),
+      supabase.from('items').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('categories').select('*').order('name'),
       supabase.from('locations').select('*').order('sort_order').order('name'),
     ])
@@ -623,20 +627,18 @@ function AppMain({ session, onLogout }) {
   }
 
   const delItem = async (id) => {
-    if (!confirm('この1点を削除しますか？')) return
-    await supabase.from('transactions').delete().eq('unit_id', id)
-    const { error } = await supabase.from('items').delete().eq('id', id)
+    if (!confirm('この1点をゴミ箱に移動しますか？\n（30日以内であれば「ゴミ箱」タブから復元できます）')) return
+    const { error } = await supabase.from('items').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     if (error) { alert('削除エラー: ' + error.message); return }
     setDetailItem(null)
     fetchAll()
   }
 
   const delProduct = async (g) => {
-    if (!confirm('「' + g.name + '」の全' + g.items.length + '点を削除しますか？')) return
-    for (const item of g.items) {
-      await supabase.from('transactions').delete().eq('unit_id', item.id)
-      await supabase.from('items').delete().eq('id', item.id)
-    }
+    if (!confirm('「' + g.name + '」の全' + g.items.length + '点をゴミ箱に移動しますか？\n（30日以内であれば「ゴミ箱」タブから復元できます）')) return
+    const ids = g.items.map(it => it.id)
+    const { error } = await supabase.from('items').update({ deleted_at: new Date().toISOString() }).in('id', ids)
+    if (error) { alert('削除エラー: ' + error.message); return }
     fetchAll()
   }
 
@@ -659,6 +661,48 @@ function AppMain({ session, onLogout }) {
     if (!confirm('保管場所「' + name + '」を削除しますか？')) return
     await supabase.from('locations').delete().eq('name', name); fetchAll()
   }
+
+  // ===== Trash bin =====
+  const fetchTrash = useCallback(async () => {
+    setLoadingTrash(true)
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const { data, error } = await supabase
+      .from('items')
+      .select('*')
+      .not('deleted_at', 'is', null)
+      .gte('deleted_at', cutoff)
+      .order('deleted_at', { ascending: false })
+    if (error) {
+      alert('ゴミ箱の読み込みに失敗しました: ' + error.message)
+      setTrashItems([])
+    } else {
+      setTrashItems(data || [])
+    }
+    setLoadingTrash(false)
+  }, [])
+
+  const restoreItem = async (id) => {
+    const { error } = await supabase.from('items').update({ deleted_at: null }).eq('id', id)
+    if (error) { alert('復元エラー: ' + error.message); return }
+    await Promise.all([fetchTrash(), fetchAll()])
+  }
+
+  const purgeItem = async (item) => {
+    if (!confirm('「' + (item.name || '無名') + '」を完全に削除します。この操作は取り消せません。続行しますか？')) return
+    const { error } = await supabase.from('items').delete().eq('id', item.id)
+    if (error) { alert('完全削除エラー: ' + error.message); return }
+    fetchTrash()
+  }
+
+  const daysUntilPurge = (deletedAtIso) => {
+    const purgeMs = new Date(deletedAtIso).getTime() + 30 * 24 * 60 * 60 * 1000
+    const remainingMs = purgeMs - Date.now()
+    return Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)))
+  }
+
+  useEffect(() => {
+    if (activeTab === 'trash') fetchTrash()
+  }, [activeTab, fetchTrash])
   const moveLoc = async (index, direction) => {
     const swapIdx = index + direction
     if (swapIdx < 0 || swapIdx >= locations.length) return
@@ -828,6 +872,7 @@ function AppMain({ session, onLogout }) {
             {activeTab === 'scan' && 'スキャン'}
             {activeTab === 'stocktake' && '棚卸し'}
             {activeTab === 'settings' && '設定'}
+            {activeTab === 'trash' && '🗑️ ゴミ箱'}
           </div>
           <div className="header-actions">
             {activeTab === 'home' && (
@@ -1158,6 +1203,11 @@ function AppMain({ session, onLogout }) {
                 <span className="settings-row-label">CSV出力</span>
                 <span className="settings-row-chevron">›</span>
               </div>
+              <div className="settings-row" onClick={() => setActiveTab('trash')}>
+                <span className="settings-row-icon">🗑️</span>
+                <span className="settings-row-label">ゴミ箱</span>
+                <span className="settings-row-chevron">›</span>
+              </div>
             </div>
 
             <div className="settings-section-title">マスター管理</div>
@@ -1243,6 +1293,76 @@ function AppMain({ session, onLogout }) {
               </div>
             </div>
           </>
+        )}
+
+        {/* ===== TRASH TAB ===== */}
+        {activeTab === 'trash' && (
+          <div className="trash-tab">
+            <div className="settings-section" style={{ marginBottom: 8 }}>
+              <div className="settings-row" onClick={() => setActiveTab('settings')} style={{ cursor: 'pointer' }}>
+                <span className="settings-row-icon">‹</span>
+                <span className="settings-row-label">設定へ戻る</span>
+              </div>
+            </div>
+
+            <div className="trash-info" style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>
+              削除した物品は30日間ゴミ箱に保管され、その後自動的に完全削除されます。
+            </div>
+
+            {loadingTrash && <div className="loading" style={{ padding: 24, textAlign: 'center', color: 'var(--text3)' }}>読み込み中...</div>}
+
+            {!loadingTrash && trashItems.length === 0 && (
+              <div className="trash-empty" style={{ padding: '48px 16px', textAlign: 'center', color: 'var(--text3)' }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>🗑️</div>
+                <div>ゴミ箱は空です</div>
+              </div>
+            )}
+
+            {!loadingTrash && trashItems.length > 0 && (
+              <div className="trash-list">
+                {trashItems.map(item => {
+                  const days = daysUntilPurge(item.deleted_at)
+                  const delDate = new Date(item.deleted_at).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                  return (
+                    <div key={item.id} className="trash-item" style={{
+                      padding: '12px 16px',
+                      borderBottom: '1px solid var(--border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.name || '無名'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
+                            {item.cat && <span>{item.cat}</span>}
+                            {item.cat && item.loc && <span> ・ </span>}
+                            {item.loc && <span>{item.loc}</span>}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>
+                          <div>削除: {delDate}</div>
+                          <div style={{ color: days <= 3 ? 'var(--danger)' : 'var(--text2)', fontWeight: 600, marginTop: 2 }}>
+                            あと {days} 日で自動削除
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn sm primary" onClick={() => restoreItem(item.id)} style={{ flex: 1 }}>
+                          棚に戻す
+                        </button>
+                        <button className="btn sm danger" onClick={() => purgeItem(item)} style={{ flex: 1 }}>
+                          完全削除
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         )}
 
       </div>
