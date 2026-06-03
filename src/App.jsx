@@ -313,6 +313,10 @@ function AppMain({ session }) {
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const aiImageInputRef = useRef(null)
 
+  // Submit guard（連打による二重登録を防止）
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [hasSubmitted, setHasSubmitted] = useState(false)
+
   // Stocktake
   const [stocktakeMode, setStocktakeMode] = useState(false)
   const [confirmedIds, setConfirmedIds] = useState(new Set())
@@ -681,7 +685,9 @@ function AppMain({ session }) {
   }
 
   const saveItem = async () => {
+    if (isSubmitting || (!editItem && hasSubmitted)) return
     if (!(form.name || '').trim()) { alert('物品名は必須です'); return }
+    setIsSubmitting(true)
     const data = {
       bc: form.bc || '',
       name: (form.name || '').trim(),
@@ -695,11 +701,11 @@ function AppMain({ session }) {
     let savedId = null
     if (editItem) {
       const { error } = await supabase.from('items').update(data).eq('id', editItem.id)
-      if (error) { alert('更新エラー: ' + error.message); return }
+      if (error) { alert('更新エラー: ' + error.message); setIsSubmitting(false); return }
       savedId = editItem.id
     } else {
       const { data: newItem, error } = await supabase.from('items').insert(data).select().single()
-      if (error) { alert('登録エラー: ' + error.message); return }
+      if (error) { alert('登録エラー: ' + error.message); setIsSubmitting(false); return }
       savedId = newItem?.id
     }
     if (savedId && imageFile) {
@@ -712,12 +718,18 @@ function AppMain({ session }) {
       await supabase.from('items').update({ image_url: null }).eq('id', savedId)
       await removeStorageByUrl(editItem.image_url)
     }
-    setShowAdd(false); setShowEdit(false); setEditItem(null)
-    setForm({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '', condition: '' })
-    setNameSuggest([])
-    setImageFile(null)
-    setImagePreview(null)
-    fetchAll()
+    setIsSubmitting(false)
+    if (editItem) {
+      setShowAdd(false); setShowEdit(false); setEditItem(null)
+      setForm({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '', condition: '' })
+      setNameSuggest([])
+      setImageFile(null)
+      setImagePreview(null)
+      fetchAll()
+    } else {
+      setHasSubmitted(true)
+      fetchAll()
+    }
   }
 
   const delItem = async (id) => {
@@ -1898,11 +1910,11 @@ function AppMain({ session }) {
 
       {/* ===== Add/Edit Modal ===== */}
       {(showAdd || showEdit) && !formHidden && (
-        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') { setShowAdd(false); setShowEdit(false); setNameSuggest([]) } }}>
+        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setHasSubmitted(false) } }}>
           <div className="modal">
             <div className="modal-header">
               <h2>{showEdit ? '物品編集' : addPreset ? '追加登録（同一物品）' : '新規物品登録'}</h2>
-              <button className="modal-close" onClick={() => { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setImageFile(null); setImagePreview(null) }}>✕</button>
+              <button className="modal-close" onClick={() => { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setImageFile(null); setImagePreview(null); setHasSubmitted(false) }}>✕</button>
             </div>
 
             <div className="field">
@@ -2052,8 +2064,31 @@ function AppMain({ session }) {
             </div>
             <p className="hint">※ 登録ごとに固有IDが割り当てられます（1登録=1点）</p>
             <div className="modal-actions">
-              <button className="btn" onClick={() => { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setImageFile(null); setImagePreview(null) }}>キャンセル</button>
-              <button className="btn primary" onClick={saveItem}>{showEdit ? '更新' : '登録'}</button>
+              {hasSubmitted && !showEdit ? (
+                <>
+                  <p className="submit-success-msg">✓ 登録しました</p>
+                  <button className="btn" onClick={() => {
+                    setHasSubmitted(false)
+                    setForm({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '', condition: '' })
+                    setImageFile(null); setImagePreview(null); setNameSuggest([])
+                  }}>続けて登録</button>
+                  <button className="btn primary" onClick={() => { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setImageFile(null); setImagePreview(null); setHasSubmitted(false) }}>閉じる</button>
+                </>
+              ) : (
+                <>
+                  <button className="btn" onClick={() => { setShowAdd(false); setShowEdit(false); setNameSuggest([]); setImageFile(null); setImagePreview(null); setHasSubmitted(false) }}>キャンセル</button>
+                  <button
+                    className="btn primary"
+                    onClick={saveItem}
+                    disabled={isSubmitting || (!showEdit && hasSubmitted)}
+                  >
+                    {showEdit
+                      ? (isSubmitting ? '更新中...' : '更新')
+                      : (isSubmitting ? '登録中...' : '登録')
+                    }
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
