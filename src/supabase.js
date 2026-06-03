@@ -10,6 +10,6 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     detectSessionInUrl: true,
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     storageKey: 'inventory-auth',
-    flowType: 'implicit',
+    flowType: 'pkce',
   },
 })

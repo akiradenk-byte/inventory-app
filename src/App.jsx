@@ -122,12 +122,68 @@ const CONDITION_COLORS = {
   'ジャンク': { bg: '#FCEBEB', color: '#791F1F' },
 }
 
-function isHitachiUrl(code) {
+// ===== 案件管理（desk_jobs）=====
+const JOB_STATUSES = ['inquiry', 'scheduled', 'in_progress', 'completed', 'invoiced', 'paid']
+const JOB_STATUS_LABELS = {
+  inquiry: '受付', scheduled: '予約', in_progress: '作業中',
+  completed: '完了', invoiced: '請求', paid: '入金',
+}
+const JOB_STATUS_COLORS = {
+  inquiry: { bg: '#FAEEDA', color: '#633806' },
+  scheduled: { bg: '#E6F1FB', color: '#0C447C' },
+  in_progress: { bg: '#FCF3D9', color: '#6B5500' },
+  completed: { bg: '#E1F5EE', color: '#085041' },
+  invoiced: { bg: '#EDE7FA', color: '#3B2A77' },
+  paid: { bg: '#D7F0E4', color: '#0A6B45' },
+}
+const EMPTY_JOB = {
+  title: '', customer_id: null, customer_name: '', status: 'inquiry',
+  maker: '', model_number: '', product_name: '', failure_detail: '',
+  scheduled_at: '', next_visit_at: '', warranty_end_date: '', amount_yen: '', notes: '', case_number: '',
+}
+
+// 共有アカウントによる自動ログイン。優先順位: env → 既定値（フォールバック）。
+// 本番(Vercel)で env 未設定でも自動ログインできるよう既定値を持たせている。
+// ※ これは専用の低権限・共有アカウント。元々クライアントのJSバンドルに含まれる前提のもの。
+//    変更/ローテーション時は、ここ・Supabase Auth・(設定していれば)Vercelのenv を更新する。
+const SHARED_EMAIL = import.meta.env.VITE_SHARED_EMAIL || 'shared@akiradenki.app'
+const SHARED_PASSWORD = import.meta.env.VITE_SHARED_PASSWORD || 'Akira-Kyoyu-2026-7xQ2tZ'
+
+// CSVセル: ダブルクオート・カンマ・改行を含む値を安全に出力
+function csvCell(v) {
+  return '"' + String(v ?? '').replace(/"/g, '""') + '"'
+}
+
+// CSVパーサ（"" エスケープ・引用内の改行に対応）
+function parseCSV(text) {
+  const rows = []
+  let row = [], cur = '', inQuotes = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++ } else inQuotes = false
+      } else cur += c
+    } else if (c === '"') inQuotes = true
+    else if (c === ',') { row.push(cur); cur = '' }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = '' }
+    else if (c === '\r') { /* ignore */ }
+    else cur += c
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row) }
+  return rows
+}
+
+// Storage上の画像をpublic URLから削除（孤児ファイル対策）
+async function removeStorageByUrl(url) {
   try {
-    const u = new URL(code)
-    const h = u.hostname.toLowerCase()
-    return h.includes('hitachi-gls') || h.includes('hitachi-cm') || h.includes('hitachi.co.jp')
-  } catch { return false }
+    if (!url) return
+    const marker = '/item-images/'
+    const idx = url.indexOf(marker)
+    if (idx === -1) return
+    const path = url.slice(idx + marker.length).split('?')[0]
+    if (path) await supabase.storage.from('item-images').remove([path])
+  } catch { /* 失敗しても致命的でないため無視 */ }
 }
 
 export default function App() {
@@ -147,27 +203,31 @@ export default function App() {
 
     // セッション初期化: onAuthStateChangeを先にセット → getSessionで初期値取得
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      if (mounted) {
-        setSession(s)
-        setAuthLoading(false)
-      }
+      if (!mounted) return
+      setSession(s)
+      if (s) setAuthLoading(false)
     })
 
-    // getSession で初期セッションを取得（onAuthStateChange の INITIAL_SESSION イベントが
-    // 発火しないケースのフォールバック）
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      if (mounted) {
-        setSession(s)
-        setAuthLoading(false)
+    // セッションが無ければ共有アカウントで自動ログイン（ログイン画面を出さない運用）
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      if (!mounted) return
+      if (s) { setSession(s); setAuthLoading(false); return }
+      if (SHARED_EMAIL && SHARED_PASSWORD) {
+        const { error } = await supabase.auth.signInWithPassword({ email: SHARED_EMAIL, password: SHARED_PASSWORD })
+        if (!mounted) return
+        if (error) { console.error('自動ログイン失敗:', error.message); setAuthLoading(false) }
+        // 成功時は onAuthStateChange が session をセットする
+      } else {
+        setAuthLoading(false) // 共有アカウント未設定 → 手動ログイン画面（フォールバック）
       }
     }).catch(() => {
       if (mounted) setAuthLoading(false)
     })
 
-    // タイムアウト: 5秒以内にauth状態が確定しなければローディングを解除
+    // タイムアウト: 一定時間で確定しなければローディング解除
     const timeout = setTimeout(() => {
-      if (mounted && authLoading) setAuthLoading(false)
-    }, 5000)
+      if (mounted) setAuthLoading(false)
+    }, 8000)
 
     return () => {
       mounted = false
@@ -176,19 +236,14 @@ export default function App() {
     }
   }, [])
 
-  const handleLogout = async () => {
-    if (!confirm('ログアウトしますか？')) return
-    await supabase.auth.signOut()
-    setSession(null)
-  }
-
   if (authLoading) return <div className="loading">読み込み中...</div>
+  // 自動ログインが未設定/失敗した場合のみ手動ログイン画面を表示（フォールバック）
   if (!session) return <LoginScreen />
 
-  return <AppMain session={session} onLogout={handleLogout} />
+  return <AppMain session={session} />
 }
 
-function AppMain({ session, onLogout }) {
+function AppMain({ session }) {
   const [items, setItems] = useState([])
   const [categories, setCategories] = useState([])
   const [locations, setLocations] = useState([])
@@ -229,6 +284,22 @@ function AppMain({ session, onLogout }) {
   const [showHelp, setShowHelp] = useState(false)
   const [helpOpen, setHelpOpen] = useState({})
 
+  // Trash (soft-deleted items)
+  const [showTrash, setShowTrash] = useState(false)
+  const [trashItems, setTrashItems] = useState([])
+
+  // Jobs (案件管理)
+  const [jobs, setJobs] = useState([])
+  const [jobStatusFilter, setJobStatusFilter] = useState('')
+  const [showJobForm, setShowJobForm] = useState(false)
+  const [editJob, setEditJob] = useState(null)
+  const [jobForm, setJobForm] = useState(EMPTY_JOB)
+  const [jobCustomerSearch, setJobCustomerSearch] = useState('')
+  const [showJobCustDropdown, setShowJobCustDropdown] = useState(false)
+  const [jobParts, setJobParts] = useState([])
+  const [jobPartSearch, setJobPartSearch] = useState('')
+  const [showJobPartDropdown, setShowJobPartDropdown] = useState(false)
+
   // Fullscreen image viewer
   const [viewerImage, setViewerImage] = useState(null)
 
@@ -253,23 +324,49 @@ function AppMain({ session, onLogout }) {
   const [lastScanResult, setLastScanResult] = useState(null)
   const lastScanTimerRef = useRef(null)
 
+  // Customers
+  const [customers, setCustomers] = useState([])
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [showCustomerForm, setShowCustomerForm] = useState(false)
+  const [showCustomerEdit, setShowCustomerEdit] = useState(false)
+  const [editCustomer, setEditCustomer] = useState(null)
+  const [customerForm, setCustomerForm] = useState({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+  const [customerAiAnalyzing, setCustomerAiAnalyzing] = useState(false)
+  const customerImageRef = useRef(null)
+  const customerCsvRef = useRef(null)
+  // Customer selector in item form
+  const [itemCustomerId, setItemCustomerId] = useState(null)
+  const [itemCustomerSearch, setItemCustomerSearch] = useState('')
+  const [showItemCustomerDropdown, setShowItemCustomerDropdown] = useState(false)
+  const [showNewCustomerInItemForm, setShowNewCustomerInItemForm] = useState(false)
+  const [newCustomerForm, setNewCustomerForm] = useState({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+  const [newCustomerAiAnalyzing, setNewCustomerAiAnalyzing] = useState(false)
+  const newCustomerImageRef = useRef(null)
+
   // Pull to refresh
   const [pullDistance, setPullDistance] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const touchStartY = useRef(0)
   const contentRef = useRef(null)
 
+  const hasLoadedRef = useRef(false)
   const fetchAll = useCallback(async () => {
-    setLoading(true)
-    const [{ data: itemsData }, { data: catsData }, { data: locsData }] = await Promise.all([
-      supabase.from('items').select('*').order('created_at', { ascending: false }),
+    // 全画面ローディングは初回のみ（保存/削除/プルリフレッシュでの画面フラッシュを防ぐ）
+    if (!hasLoadedRef.current) setLoading(true)
+    const [{ data: itemsData }, { data: catsData }, { data: locsData }, { data: custData }, { data: jobsData }] = await Promise.all([
+      supabase.from('items').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
       supabase.from('categories').select('*').order('name'),
       supabase.from('locations').select('*').order('sort_order').order('name'),
+      supabase.from('customers').select('*').eq('is_deleted', false).order('created_at', { ascending: false }),
+      supabase.from('desk_jobs').select('*').order('created_at', { ascending: false }),
     ])
     setItems(itemsData || [])
     setCategories((catsData || []).map(c => c.name))
     setLocations((locsData || []).map(l => ({ name: l.name, sort_order: l.sort_order ?? 0 })))
+    setCustomers(custData || [])
+    setJobs(jobsData || [])
     setLoading(false)
+    hasLoadedRef.current = true
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
@@ -355,10 +452,16 @@ function AppMain({ session, onLogout }) {
     setShowScanner(true)
   }
 
+  // ログイン中ユーザーのアクセストークンをAPIへ渡すヘッダ（API側で認証検証）
+  const authHeader = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.access_token ? { Authorization: 'Bearer ' + session.access_token } : {}
+  }
+
   const fetchHitachiPartInfo = async (url) => {
     try {
       setFetchingPart(true)
-      const resp = await fetch('/api/fetch-part-info?url=' + encodeURIComponent(url))
+      const resp = await fetch('/api/fetch-part-info?url=' + encodeURIComponent(url), { headers: { ...(await authHeader()) } })
       if (!resp.ok) { console.error('fetch-part-info error:', resp.status); return null }
       return await resp.json()
     } catch (err) {
@@ -384,13 +487,11 @@ function AppMain({ session, onLogout }) {
 
       // scanTarget === 'form' （スキャンタブから）
       const urlStr = (code || '').trim()
-      let isHitachi = false
 
       try {
         const url = new URL(urlStr.toLowerCase().startsWith('http') ? urlStr : 'http://' + urlStr)
         const hostname = url.hostname.toLowerCase()
         if (hostname.includes('hitachi-gls') || hostname.includes('hitachi-cm')) {
-          isHitachi = true
           const params = url.searchParams
           const pno = params.get('pno') || params.get('PNO') || params.get('Pno') || ''
           const cno = params.get('cno') || params.get('CNO') || params.get('Cno') || ''
@@ -430,7 +531,7 @@ function AppMain({ session, onLogout }) {
           }).catch(() => { setTimeout(() => setScanToast(null), 3000) })
           return
         }
-      } catch (e) {}
+      } catch { /* URLでなければ通常バーコードとして処理 */ }
 
       // 通常バーコード: 既存アイテム検索
       const codeLower = code.toLowerCase()
@@ -487,23 +588,31 @@ function AppMain({ session, onLogout }) {
     e.target.value = ''
   }
 
-  const resizeAndConvert = (file, maxSize = 1024) => new Promise((resolve) => {
+  const resizeAndConvert = (file, maxSize = 1024) => new Promise((resolve, reject) => {
     const img = new Image()
+    const url = URL.createObjectURL(file)
+    const cleanup = () => { try { URL.revokeObjectURL(url) } catch { /* noop */ } }
+    // デコードできない画像(HEIC等)で固まらないようタイムアウト＋onerrorを設定
+    const timer = setTimeout(() => { cleanup(); reject(new Error('画像の読み込みがタイムアウトしました')) }, 15000)
     img.onload = () => {
-      let { width, height } = img
-      if (width > maxSize || height > maxSize) {
-        const ratio = Math.min(maxSize / width, maxSize / height)
-        width = Math.round(width * ratio)
-        height = Math.round(height * ratio)
-      }
-      const canvas = document.createElement('canvas')
-      canvas.width = width; canvas.height = height
-      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
-      const base64 = dataUrl.split(',')[1]
-      canvas.toBlob(blob => resolve({ base64, blob }), 'image/jpeg', 0.8)
+      clearTimeout(timer)
+      try {
+        let { width, height } = img
+        if (width > maxSize || height > maxSize) {
+          const ratio = Math.min(maxSize / width, maxSize / height)
+          width = Math.round(width * ratio)
+          height = Math.round(height * ratio)
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
+        const base64 = dataUrl.split(',')[1]
+        canvas.toBlob(blob => { cleanup(); resolve({ base64, blob }) }, 'image/jpeg', 0.8)
+      } catch (err) { cleanup(); reject(err) }
     }
-    img.src = URL.createObjectURL(file)
+    img.onerror = () => { clearTimeout(timer); cleanup(); reject(new Error('画像を読み込めませんでした（対応していない形式の可能性）')) }
+    img.src = url
   })
 
   const handleAiAnalyze = async (e) => {
@@ -526,7 +635,7 @@ function AppMain({ session, onLogout }) {
       try {
         resp = await fetch('/api/analyze-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
           body: JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
           signal: controller.signal,
         })
@@ -581,6 +690,7 @@ function AppMain({ session, onLogout }) {
       price: parseInt(form.price) || 0,
       note: (form.note || '').trim(),
       condition: form.condition || null,
+      customer_id: itemCustomerId || null,
     }
     let savedId = null
     if (editItem) {
@@ -596,9 +706,11 @@ function AppMain({ session, onLogout }) {
       const url = await uploadImage(savedId, imageFile)
       if (url) {
         await supabase.from('items').update({ image_url: url }).eq('id', savedId)
+        if (editItem?.image_url && editItem.image_url !== url) await removeStorageByUrl(editItem.image_url)
       }
     } else if (savedId && imagePreview === null && editItem?.image_url) {
       await supabase.from('items').update({ image_url: null }).eq('id', savedId)
+      await removeStorageByUrl(editItem.image_url)
     }
     setShowAdd(false); setShowEdit(false); setEditItem(null)
     setForm({ bc: '', name: '', cat: '', loc: '', price: 0, note: '', image_url: '', condition: '' })
@@ -609,21 +721,132 @@ function AppMain({ session, onLogout }) {
   }
 
   const delItem = async (id) => {
-    if (!confirm('この1点を削除しますか？')) return
-    await supabase.from('transactions').delete().eq('unit_id', id)
-    const { error } = await supabase.from('items').delete().eq('id', id)
+    if (!confirm('この1点をゴミ箱へ移動しますか？（30日後に自動削除）')) return
+    const { error } = await supabase.from('items').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     if (error) { alert('削除エラー: ' + error.message); return }
     setDetailItem(null)
     fetchAll()
   }
 
   const delProduct = async (g) => {
-    if (!confirm('「' + g.name + '」の全' + g.items.length + '点を削除しますか？')) return
-    for (const item of g.items) {
-      await supabase.from('transactions').delete().eq('unit_id', item.id)
-      await supabase.from('items').delete().eq('id', item.id)
-    }
+    if (!confirm('「' + g.name + '」の全' + g.items.length + '点をゴミ箱へ移動しますか？（30日後に自動削除）')) return
+    const ids = g.items.map(i => i.id)
+    const { error } = await supabase.from('items').update({ deleted_at: new Date().toISOString() }).in('id', ids)
+    if (error) { alert('削除エラー: ' + error.message); return }
     fetchAll()
+  }
+
+  // ===== ゴミ箱（ソフト削除） =====
+  const fetchTrash = async () => {
+    const { data } = await supabase.from('items').select('*').not('deleted_at', 'is', null).order('deleted_at', { ascending: false })
+    setTrashItems(data || [])
+  }
+  const restoreItem = async (id) => {
+    const { error } = await supabase.from('items').update({ deleted_at: null }).eq('id', id)
+    if (error) { alert('復元エラー: ' + error.message); return }
+    fetchTrash(); fetchAll()
+  }
+  const purgeItem = async (item) => {
+    if (!confirm('「' + (item.name || '') + '」を完全に削除しますか？元に戻せません。')) return
+    const { error } = await supabase.from('items').delete().eq('id', item.id)
+    if (error) { alert('削除エラー: ' + error.message); return }
+    if (item.image_url) await removeStorageByUrl(item.image_url)
+    fetchTrash()
+  }
+  const emptyTrash = async () => {
+    if (trashItems.length === 0) return
+    if (!confirm('ゴミ箱の全' + trashItems.length + '点を完全に削除しますか？元に戻せません。')) return
+    const ids = trashItems.map(i => i.id)
+    const { error } = await supabase.from('items').delete().in('id', ids)
+    if (error) { alert('削除エラー: ' + error.message); return }
+    for (const it of trashItems) { if (it.image_url) await removeStorageByUrl(it.image_url) }
+    fetchTrash()
+  }
+
+  // ===== 案件管理（desk_jobs） =====
+  const openJobForm = () => {
+    setEditJob(null); setJobForm(EMPTY_JOB)
+    setJobCustomerSearch(''); setShowJobCustDropdown(false)
+    setJobParts([]); setJobPartSearch(''); setShowJobPartDropdown(false)
+    setShowJobForm(true)
+  }
+  const openJobEdit = (job) => {
+    setEditJob(job)
+    setJobForm({
+      title: job.title || '', customer_id: job.customer_id || null, customer_name: job.customer_name || '',
+      status: job.status || 'inquiry', maker: job.maker || '', model_number: job.model_number || '',
+      product_name: job.product_name || '', failure_detail: job.failure_detail || '',
+      scheduled_at: job.scheduled_at ? job.scheduled_at.slice(0, 16) : '',
+      next_visit_at: job.next_visit_at ? job.next_visit_at.slice(0, 16) : '',
+      warranty_end_date: job.warranty_end_date || '',
+      amount_yen: job.amount_yen ?? '', notes: job.notes || '', case_number: job.case_number || '',
+    })
+    setJobCustomerSearch(''); setShowJobCustDropdown(false)
+    setJobPartSearch(''); setShowJobPartDropdown(false)
+    fetchJobParts(job.id)
+    setShowJobForm(true)
+  }
+  const saveJob = async () => {
+    if (!(jobForm.title || '').trim()) { alert('案件名は必須です'); return }
+    const data = {
+      title: jobForm.title.trim(),
+      customer_id: jobForm.customer_id || null,
+      customer_name: (jobForm.customer_name || '').trim(),
+      status: jobForm.status || 'inquiry',
+      maker: (jobForm.maker || '').trim() || null,
+      model_number: (jobForm.model_number || '').trim() || null,
+      product_name: (jobForm.product_name || '').trim() || null,
+      failure_detail: (jobForm.failure_detail || '').trim() || null,
+      scheduled_at: jobForm.scheduled_at ? new Date(jobForm.scheduled_at).toISOString() : null,
+      next_visit_at: jobForm.next_visit_at ? new Date(jobForm.next_visit_at).toISOString() : null,
+      warranty_end_date: jobForm.warranty_end_date || null,
+      amount_yen: (jobForm.amount_yen === '' || jobForm.amount_yen === null) ? null : Math.max(0, parseInt(jobForm.amount_yen) || 0),
+      notes: (jobForm.notes || '').trim() || null,
+      case_number: (jobForm.case_number || '').trim() || null,
+      updated_at: new Date().toISOString(),
+    }
+    if (editJob) {
+      const { error } = await supabase.from('desk_jobs').update(data).eq('id', editJob.id)
+      if (error) { alert('更新エラー: ' + error.message); return }
+    } else {
+      const { error } = await supabase.from('desk_jobs').insert(data)
+      if (error) { alert('登録エラー: ' + error.message); return }
+    }
+    setShowJobForm(false); setEditJob(null); setJobForm(EMPTY_JOB)
+    fetchAll()
+  }
+  const deleteJob = async (job) => {
+    if (!confirm('案件「' + (job.title || '') + '」を削除しますか？')) return
+    const { error } = await supabase.from('desk_jobs').delete().eq('id', job.id)
+    if (error) { alert('削除エラー: ' + error.message); return }
+    setShowJobForm(false); setEditJob(null)
+    fetchAll()
+  }
+
+  // ----- 案件の使用部品（desk_job_items）-----
+  const fetchJobParts = async (jobId) => {
+    const { data } = await supabase.from('desk_job_items').select('*').eq('job_id', jobId).order('created_at', { ascending: true })
+    setJobParts(data || [])
+  }
+  const addJobPart = async (item) => {
+    if (!editJob) return
+    const { error } = await supabase.from('desk_job_items').insert({
+      job_id: editJob.id, item_id: item.id, name: item.name || '', unit_price: item.price || 0, qty: 1,
+    })
+    if (error) { alert('部品追加エラー: ' + error.message); return }
+    setJobPartSearch(''); setShowJobPartDropdown(false)
+    fetchJobParts(editJob.id)
+  }
+  const removeJobPart = async (partId) => {
+    const { error } = await supabase.from('desk_job_items').delete().eq('id', partId)
+    if (error) { alert('削除エラー: ' + error.message); return }
+    if (editJob) fetchJobParts(editJob.id)
+  }
+  const updateJobPartQty = async (part, qty) => {
+    const q = Math.max(1, parseInt(qty) || 1)
+    const { error } = await supabase.from('desk_job_items').update({ qty: q }).eq('id', part.id)
+    if (error) { alert('更新エラー: ' + error.message); return }
+    if (editJob) fetchJobParts(editJob.id)
   }
 
   const addCat = async () => {
@@ -661,16 +884,203 @@ function AppMain({ session, onLogout }) {
   }
 
   const exportCSV = () => {
-    const header = 'ID,バーコード,物品名,カテゴリ,保管場所,単価,メモ,登録日時'
+    const header = ['ID', 'バーコード', '物品名', 'カテゴリ', '保管場所', '状態', '単価', 'メモ', '登録日時'].map(csvCell).join(',')
     const rows = items.map(i => [
-      i.id, i.bc, '"' + (i.name || '') + '"', i.cat, i.loc, i.price, '"' + (i.note || '') + '"', i.created_at
-    ].join(','))
+      i.id, i.bc, i.name || '', i.cat, i.loc, i.condition || '', i.price, i.note || '', i.created_at
+    ].map(csvCell).join(','))
     const csv = '\uFEFF' + [header, ...rows].join('\n')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     a.download = '在庫_' + new Date().toISOString().slice(0, 10) + '.csv'
     a.click()
   }
+
+  // ===== Customer Functions =====
+  const saveCustomer = async (formData, isInlineNew = false) => {
+    if (!(formData.name || '').trim()) { alert('顧客名は必須です'); return null }
+    const data = {
+      name: (formData.name || '').trim(),
+      furigana: (formData.furigana || '').trim(),
+      phone1: (formData.phone1 || '').trim(),
+      phone2: (formData.phone2 || '').trim(),
+      phone3: (formData.phone3 || '').trim(),
+      address: (formData.address || '').trim(),
+      postal_code: (formData.postal_code || '').trim(),
+      memo: (formData.memo || '').trim(),
+    }
+    const { data: newCust, error } = await supabase.from('customers').insert(data).select().single()
+    if (error) { alert('顧客登録エラー: ' + error.message); return null }
+    await fetchAll()
+    if (!isInlineNew) {
+      setShowCustomerForm(false)
+      setCustomerForm({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+    }
+    return newCust
+  }
+
+  const updateCustomer = async () => {
+    if (!editCustomer) return
+    if (!(customerForm.name || '').trim()) { alert('顧客名は必須です'); return }
+    const data = {
+      name: (customerForm.name || '').trim(),
+      furigana: (customerForm.furigana || '').trim(),
+      phone1: (customerForm.phone1 || '').trim(),
+      phone2: (customerForm.phone2 || '').trim(),
+      phone3: (customerForm.phone3 || '').trim(),
+      address: (customerForm.address || '').trim(),
+      postal_code: (customerForm.postal_code || '').trim(),
+      memo: (customerForm.memo || '').trim(),
+      updated_at: new Date().toISOString(),
+    }
+    const { error } = await supabase.from('customers').update(data).eq('id', editCustomer.id)
+    if (error) { alert('更新エラー: ' + error.message); return }
+    setShowCustomerEdit(false)
+    setEditCustomer(null)
+    setCustomerForm({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+    fetchAll()
+  }
+
+  const deleteCustomer = async (cust) => {
+    if (!confirm('「' + cust.name + '」を削除しますか？')) return
+    const { error } = await supabase.from('customers').update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq('id', cust.id)
+    if (error) { alert('削除エラー: ' + error.message); return }
+    fetchAll()
+  }
+
+  const openCustomerEdit = (cust) => {
+    setEditCustomer(cust)
+    setCustomerForm({
+      name: cust.name || '', furigana: cust.furigana || '',
+      phone1: cust.phone1 || '', phone2: cust.phone2 || '', phone3: cust.phone3 || '',
+      address: cust.address || '', postal_code: cust.postal_code || '', memo: cust.memo || '',
+    })
+    setShowCustomerEdit(true)
+  }
+
+  const exportCustomersCSV = () => {
+    const header = ['ID', '顧客名', 'フリガナ', '電話番号1', '電話番号2', '電話番号3', '住所', '郵便番号', 'メモ', '登録日'].map(csvCell).join(',')
+    const rows = customers.map(c => [
+      c.id, c.name || '', c.furigana || '', c.phone1 || '', c.phone2 || '', c.phone3 || '',
+      c.address || '', c.postal_code || '', c.memo || '', c.created_at,
+    ].map(csvCell).join(','))
+    const csv = '\uFEFF' + [header, ...rows].join('\n')
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    a.download = '顧客_' + new Date().toISOString().slice(0, 10) + '.csv'
+    a.click()
+  }
+
+  const importCustomersCSV = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const text = await file.text()
+    const allRows = parseCSV(text).filter(r => r.some(c => (c || '').trim()))
+    if (allRows.length < 2) { alert('CSVにデータがありません'); return }
+    let imported = 0
+    for (let i = 1; i < allRows.length; i++) {
+      const cols = allRows[i]
+      if (!cols || cols.length < 2 || !(cols[1] || '').trim()) continue
+      const row = {
+        name: (cols[1] || '').trim(),
+        furigana: (cols[2] || '').trim(),
+        phone1: (cols[3] || '').trim(),
+        phone2: (cols[4] || '').trim(),
+        phone3: (cols[5] || '').trim(),
+        address: (cols[6] || '').trim(),
+        postal_code: (cols[7] || '').trim(),
+        memo: (cols[8] || '').trim(),
+      }
+      const { error } = await supabase.from('customers').insert(row)
+      if (!error) imported++
+    }
+    alert(imported + '件の顧客をインポートしました')
+    fetchAll()
+  }
+
+  const handleCustomerAiAnalyze = async (e, targetForm, setTargetForm, setAnalyzing) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setAnalyzing(true)
+    try {
+      const { base64 } = await resizeAndConvert(file)
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30000)
+      let resp
+      try {
+        resp = await fetch('/api/parse-business-card', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+          body: JSON.stringify({ image: base64, mediaType: 'image/jpeg' }),
+          signal: controller.signal,
+        })
+      } finally { clearTimeout(timeout) }
+      const data = await resp.json()
+      if (data.error) { alert('AI解析エラー: ' + data.error); setAnalyzing(false); return }
+      const nameStr = data.company_name
+        ? (data.name ? data.company_name + ' ' + data.name : data.company_name)
+        : (data.name || '')
+      setTargetForm(f => ({
+        ...f,
+        name: nameStr || f.name,
+        furigana: data.furigana || f.furigana,
+        phone1: data.phone1 || f.phone1,
+        phone2: data.phone2 || f.phone2,
+        phone3: data.phone3 || f.phone3,
+        address: data.address || f.address,
+        postal_code: data.postal_code || f.postal_code,
+        memo: [f.memo, data.email ? 'Email: ' + data.email : '', data.memo || ''].filter(Boolean).join('\n') || f.memo,
+      }))
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        alert('読み取りに失敗しました（タイムアウト）')
+      } else {
+        alert('読み取りに失敗しました: ' + (err.message || err))
+      }
+    }
+    setAnalyzing(false)
+  }
+
+  const filteredCustomers = customers.filter(c => {
+    if (!customerSearch) return true
+    const q = customerSearch.toLowerCase()
+    return (c.name || '').toLowerCase().includes(q) ||
+      (c.furigana || '').toLowerCase().includes(q) ||
+      (c.phone1 || '').includes(q) ||
+      (c.phone2 || '').includes(q) ||
+      (c.phone3 || '').includes(q) ||
+      (c.address || '').toLowerCase().includes(q)
+  })
+
+  const itemCustomerResults = itemCustomerSearch.length >= 1
+    ? customers.filter(c => {
+        const q = itemCustomerSearch.toLowerCase()
+        return (c.name || '').toLowerCase().includes(q) ||
+          (c.furigana || '').toLowerCase().includes(q) ||
+          (c.phone1 || '').includes(q) ||
+          (c.address || '').toLowerCase().includes(q)
+      }).slice(0, 10)
+    : []
+
+  const selectedCustomerObj = itemCustomerId ? customers.find(c => c.id === itemCustomerId) : null
+
+  const filteredJobs = jobStatusFilter ? jobs.filter(j => j.status === jobStatusFilter) : jobs
+  const jobCustomerResults = jobCustomerSearch.length >= 1
+    ? customers.filter(c => {
+        const q = jobCustomerSearch.toLowerCase()
+        return (c.name || '').toLowerCase().includes(q) ||
+          (c.furigana || '').toLowerCase().includes(q) ||
+          (c.phone1 || '').includes(q)
+      }).slice(0, 10)
+    : []
+  const jobPartsTotal = jobParts.reduce((s, p) => s + (p.unit_price || 0) * (p.qty || 1), 0)
+  const jobPartResults = jobPartSearch.length >= 1
+    ? items.filter(i => {
+        const q = jobPartSearch.toLowerCase()
+        return (i.name || '').toLowerCase().includes(q) || (i.bc || '').toLowerCase().includes(q)
+      }).slice(0, 10)
+    : []
 
   const handleNameInput = (v) => {
     setForm(f => ({ ...f, name: v }))
@@ -697,8 +1107,10 @@ function AppMain({ session, onLogout }) {
   }
 
   const openAdd = () => {
-    setForm({ bc: '', name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '' })
-    setAddPreset(null); setImageFile(null); setImagePreview(null); setShowAdd(true)
+    setForm({ bc: '', name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '', condition: '' })
+    setAddPreset(null); setImageFile(null); setImagePreview(null)
+    setItemCustomerId(null); setItemCustomerSearch(''); setShowItemCustomerDropdown(false); setShowNewCustomerInItemForm(false)
+    setShowAdd(true)
   }
 
   const openEdit = (item) => {
@@ -706,6 +1118,7 @@ function AppMain({ session, onLogout }) {
     setForm({ bc: item.bc || '', name: item.name || '', cat: item.cat || '', loc: item.loc || '', price: item.price || 0, note: item.note || '', image_url: item.image_url || '', condition: item.condition || '' })
     setImageFile(null)
     setImagePreview(item.image_url || null)
+    setItemCustomerId(item.customer_id || null); setItemCustomerSearch(''); setShowItemCustomerDropdown(false); setShowNewCustomerInItemForm(false)
     setDetailItem(null)
     setShowEdit(true)
   }
@@ -714,11 +1127,6 @@ function AppMain({ session, onLogout }) {
 
   const kinds = new Set(items.map(i => (i.name || '') + '_' + (i.bc || ''))).size
   const totalVal = items.reduce((s, i) => s + (i.price || 0), 0)
-
-  const shortId = (id) => {
-    try { return String(id || '').slice(0, 8) }
-    catch { return '?' }
-  }
 
   // ===== Stocktake =====
   const startStocktake = () => {
@@ -754,11 +1162,17 @@ function AppMain({ session, onLogout }) {
 
   const handleStocktakeScan = useCallback((code) => {
     const codeLower = (code || '').toLowerCase()
-    const matched = items.filter(i =>
-      (i.bc && i.bc.toLowerCase() === codeLower) ||
-      (i.bc && codeLower.includes(i.bc.toLowerCase())) ||
-      (i.bc && i.bc.toLowerCase().includes(codeLower))
-    )
+    // 完全一致を基本とし、部分一致は誤確認を防ぐため十分に長いコード同士のみ許可
+    const PARTIAL_MIN = 8
+    const matched = items.filter(i => {
+      if (!i.bc) return false
+      const bc = i.bc.toLowerCase()
+      if (bc === codeLower) return true
+      if (bc.length >= PARTIAL_MIN && codeLower.length >= PARTIAL_MIN) {
+        return bc.includes(codeLower) || codeLower.includes(bc)
+      }
+      return false
+    })
 
     if (matched.length > 0) {
       const first = matched[0]
@@ -813,11 +1227,22 @@ function AppMain({ session, onLogout }) {
             {activeTab === 'home' && '在庫管理'}
             {activeTab === 'scan' && 'スキャン'}
             {activeTab === 'stocktake' && '棚卸し'}
+            {activeTab === 'customers' && '顧客管理'}
+            {activeTab === 'jobs' && '案件管理'}
             {activeTab === 'settings' && '設定'}
           </div>
           <div className="header-actions">
             {activeTab === 'home' && (
               <button className="btn icon-btn" onClick={openAdd}>+</button>
+            )}
+            {activeTab === 'customers' && (
+              <button className="btn icon-btn" onClick={() => {
+                setCustomerForm({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+                setShowCustomerForm(true)
+              }}>+</button>
+            )}
+            {activeTab === 'jobs' && (
+              <button className="btn icon-btn" onClick={openJobForm}>+</button>
             )}
             {activeTab === 'stocktake' && stocktakeMode && (
               <button className="btn sm danger" onClick={endStocktake}>終了</button>
@@ -994,7 +1419,7 @@ function AppMain({ session, onLogout }) {
           <div className="scan-tab-content">
             <button className="scan-tab-btn" onClick={() => {
               setScanTarget('form')
-              setForm({ bc: '', name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '' })
+              setForm({ bc: '', name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '', condition: '' })
               setAddPreset(null); setImageFile(null); setImagePreview(null)
               setShowScanner(true)
             }}>
@@ -1134,6 +1559,94 @@ function AppMain({ session, onLogout }) {
           </>
         )}
 
+        {/* ===== CUSTOMERS TAB ===== */}
+        {activeTab === 'customers' && (
+          <>
+            <div className="customer-search-bar">
+              <div className="search-input-wrap">
+                <span className="search-icon">🔍</span>
+                <input
+                  type="text"
+                  placeholder="名前・電話番号・住所で検索..."
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="customer-actions-bar">
+              <button className="btn sm primary" onClick={() => {
+                setCustomerForm({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+                setShowCustomerForm(true)
+              }}>+ 新規顧客</button>
+              <button className="btn sm" onClick={exportCustomersCSV}>CSV出力</button>
+              <input ref={customerCsvRef} type="file" accept=".csv" onChange={importCustomersCSV} style={{ display: 'none' }} />
+              <button className="btn sm" onClick={() => customerCsvRef.current?.click()}>CSVインポート</button>
+            </div>
+
+            {filteredCustomers.length > 0 ? (
+              <div className="customer-list">
+                {filteredCustomers.map(c => (
+                  <div key={c.id} className="customer-card" onClick={() => openCustomerEdit(c)}>
+                    <div className="customer-card-main">
+                      <div className="customer-card-name">{c.name || '(名前なし)'}</div>
+                      {c.furigana && <div className="customer-card-furigana">{c.furigana}</div>}
+                    </div>
+                    <div className="customer-card-details">
+                      {c.phone1 && <span className="customer-card-phone">📞 {c.phone1}</span>}
+                      {c.address && <span className="customer-card-address">📍 {c.address.length > 20 ? c.address.slice(0, 20) + '...' : c.address}</span>}
+                    </div>
+                    <div className="customer-card-date">
+                      {c.created_at ? new Date(c.created_at).toLocaleDateString('ja-JP') : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty">{customerSearch ? '該当する顧客がありません' : '顧客が登録されていません'}</div>
+            )}
+            <div className="pager"><span>{filteredCustomers.length} 件</span></div>
+          </>
+        )}
+
+        {/* ===== JOBS TAB ===== */}
+        {activeTab === 'jobs' && (
+          <>
+            <div className="job-status-filter">
+              <button className={'job-chip' + (jobStatusFilter === '' ? ' active' : '')} onClick={() => setJobStatusFilter('')}>全て ({jobs.length})</button>
+              {JOB_STATUSES.map(s => {
+                const cnt = jobs.filter(j => j.status === s).length
+                return <button key={s} className={'job-chip' + (jobStatusFilter === s ? ' active' : '')} onClick={() => setJobStatusFilter(s)}>{JOB_STATUS_LABELS[s]} ({cnt})</button>
+              })}
+            </div>
+            {filteredJobs.length > 0 ? (
+              <div className="job-list">
+                {filteredJobs.map(job => (
+                  <div key={job.id} className="job-card" onClick={() => openJobEdit(job)}>
+                    <div className="job-card-top">
+                      <span className="job-status-badge" style={{ background: JOB_STATUS_COLORS[job.status]?.bg || '#F1EFE8', color: JOB_STATUS_COLORS[job.status]?.color || '#444' }}>{JOB_STATUS_LABELS[job.status] || job.status}</span>
+                      <span className="job-card-title">{job.title || '(無題)'}</span>
+                    </div>
+                    {(job.customer_name || job.maker || job.model_number || job.product_name) && (
+                      <div className="job-card-meta">
+                        {job.customer_name && <span>👤 {job.customer_name}</span>}
+                        {(job.maker || job.model_number || job.product_name) && <span>🔧 {[job.maker, job.model_number, job.product_name].filter(Boolean).join(' ')}</span>}
+                      </div>
+                    )}
+                    <div className="job-card-meta">
+                      {job.scheduled_at && <span>📅 {new Date(job.scheduled_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                      {(job.amount_yen || job.amount_yen === 0) && <span className="job-card-amount">¥{(job.amount_yen || 0).toLocaleString()}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty">{jobs.length === 0 ? '案件がありません。右上の＋から登録できます' : '該当する案件がありません'}</div>
+            )}
+            <div className="pager"><span>{filteredJobs.length} 件</span></div>
+          </>
+        )}
+
         {/* ===== SETTINGS TAB ===== */}
         {activeTab === 'settings' && (
           <>
@@ -1142,6 +1655,11 @@ function AppMain({ session, onLogout }) {
               <div className="settings-row" onClick={exportCSV}>
                 <span className="settings-row-icon">📄</span>
                 <span className="settings-row-label">CSV出力</span>
+                <span className="settings-row-chevron">›</span>
+              </div>
+              <div className="settings-row" onClick={() => { fetchTrash(); setShowTrash(true) }}>
+                <span className="settings-row-icon">🗑️</span>
+                <span className="settings-row-label">ゴミ箱</span>
                 <span className="settings-row-chevron">›</span>
               </div>
             </div>
@@ -1197,12 +1715,7 @@ function AppMain({ session, onLogout }) {
             <div className="settings-section">
               <div className="settings-row" style={{ cursor: 'default' }}>
                 <span className="settings-row-icon">👤</span>
-                <span className="settings-row-label" style={{ fontSize: 13 }}>{session?.user?.email || '—'}</span>
-              </div>
-              <div className="settings-row" onClick={onLogout}>
-                <span className="settings-row-icon">🚪</span>
-                <span className="settings-row-label" style={{ color: 'var(--danger)' }}>ログアウト</span>
-                <span className="settings-row-chevron">›</span>
+                <span className="settings-row-label" style={{ fontSize: 13 }}>{session?.user?.email || '共有アカウント'}</span>
               </div>
             </div>
 
@@ -1242,6 +1755,14 @@ function AppMain({ session, onLogout }) {
         <button className={'tab-item' + (activeTab === 'scan' ? ' active' : '')} onClick={() => setActiveTab('scan')}>
           <span className="tab-icon">📷</span>
           <span className="tab-label">スキャン</span>
+        </button>
+        <button className={'tab-item' + (activeTab === 'customers' ? ' active' : '')} onClick={() => setActiveTab('customers')}>
+          <span className="tab-icon">👥</span>
+          <span className="tab-label">顧客</span>
+        </button>
+        <button className={'tab-item' + (activeTab === 'jobs' ? ' active' : '')} onClick={() => setActiveTab('jobs')}>
+          <span className="tab-icon">🛠️</span>
+          <span className="tab-label">案件</span>
         </button>
         <button className={'tab-item' + (activeTab === 'stocktake' ? ' active' : '')} onClick={() => setActiveTab('stocktake')}>
           <span className="tab-icon">📋</span>
@@ -1352,6 +1873,15 @@ function AppMain({ session, onLogout }) {
                 <span className="detail-label">メモ</span>
                 <span className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>{detailItem.note || '—'}</span>
               </div>
+              {detailItem.customer_id && (() => {
+                const cust = customers.find(c => c.id === detailItem.customer_id)
+                return cust ? (
+                  <div className="detail-info-row">
+                    <span className="detail-label">顧客</span>
+                    <span className="detail-value">{cust.name}{cust.phone1 ? ' / ' + cust.phone1 : ''}</span>
+                  </div>
+                ) : null
+              })()}
               <div className="detail-info-row">
                 <span className="detail-label">ID</span>
                 <span className="detail-value mono" style={{ fontSize: '11px' }}>{String(detailItem.id || '')}</span>
@@ -1396,6 +1926,76 @@ function AppMain({ session, onLogout }) {
               <button type="button" className="ai-analyze-btn" onClick={() => aiImageInputRef.current?.click()} disabled={aiAnalyzing}>
                 {aiAnalyzing ? '🤖 AI解析中...' : '📸 AI読取'}
               </button>
+            </div>
+
+            {/* Customer Selector */}
+            <div className="field" style={{ position: 'relative' }}>
+              <label>顧客</label>
+              {selectedCustomerObj ? (
+                <div className="selected-customer">
+                  <span className="selected-customer-name">{selectedCustomerObj.name}</span>
+                  {selectedCustomerObj.phone1 && <span className="selected-customer-phone">{selectedCustomerObj.phone1}</span>}
+                  <button type="button" className="selected-customer-clear" onClick={() => { setItemCustomerId(null); setItemCustomerSearch('') }}>✕</button>
+                </div>
+              ) : showNewCustomerInItemForm ? (
+                <div className="inline-customer-form">
+                  <div className="inline-customer-header">
+                    <span>新規顧客登録</span>
+                    <button type="button" className="btn sm" onClick={() => setShowNewCustomerInItemForm(false)}>戻る</button>
+                  </div>
+                  <input ref={newCustomerImageRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleCustomerAiAnalyze(e, newCustomerForm, setNewCustomerForm, setNewCustomerAiAnalyzing)} style={{ display: 'none' }} />
+                  <button type="button" className="ai-analyze-btn sm" onClick={() => newCustomerImageRef.current?.click()} disabled={newCustomerAiAnalyzing}>
+                    {newCustomerAiAnalyzing ? '🤖 解析中...' : '📷 画像から入力'}
+                  </button>
+                  <input type="text" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} placeholder="顧客名 *" />
+                  <input type="text" value={newCustomerForm.furigana} onChange={e => setNewCustomerForm(f => ({ ...f, furigana: e.target.value }))} placeholder="フリガナ" />
+                  <div className="field-row compact">
+                    <input type="tel" value={newCustomerForm.phone1} onChange={e => setNewCustomerForm(f => ({ ...f, phone1: e.target.value }))} placeholder="連絡先1" />
+                    <input type="tel" value={newCustomerForm.phone2} onChange={e => setNewCustomerForm(f => ({ ...f, phone2: e.target.value }))} placeholder="連絡先2" />
+                  </div>
+                  <input type="tel" value={newCustomerForm.phone3} onChange={e => setNewCustomerForm(f => ({ ...f, phone3: e.target.value }))} placeholder="連絡先3" />
+                  <input type="text" value={newCustomerForm.postal_code} onChange={e => setNewCustomerForm(f => ({ ...f, postal_code: e.target.value }))} placeholder="郵便番号" />
+                  <input type="text" value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))} placeholder="住所" />
+                  <textarea value={newCustomerForm.memo} onChange={e => setNewCustomerForm(f => ({ ...f, memo: e.target.value }))} placeholder="メモ" rows={2} />
+                  <button type="button" className="btn sm primary" onClick={async () => {
+                    const cust = await saveCustomer(newCustomerForm, true)
+                    if (cust) {
+                      setItemCustomerId(cust.id)
+                      setShowNewCustomerInItemForm(false)
+                      setNewCustomerForm({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+                    }
+                  }}>登録</button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={itemCustomerSearch}
+                    onChange={e => { setItemCustomerSearch(e.target.value); setShowItemCustomerDropdown(true) }}
+                    onFocus={() => setShowItemCustomerDropdown(true)}
+                    placeholder="顧客を検索（名前・電話番号・住所）"
+                    autoComplete="off"
+                  />
+                  {showItemCustomerDropdown && itemCustomerSearch.length >= 1 && (
+                    <div className="suggest-box customer-suggest">
+                      {itemCustomerResults.map(c => (
+                        <div key={c.id} className="suggest-item" onMouseDown={() => {
+                          setItemCustomerId(c.id); setItemCustomerSearch(''); setShowItemCustomerDropdown(false)
+                        }}>
+                          <span className="suggest-customer-name">{c.name}</span>
+                          {c.phone1 && <span className="suggest-customer-sub">{c.phone1}</span>}
+                          {c.address && <span className="suggest-customer-sub">{c.address.length > 15 ? c.address.slice(0, 15) + '...' : c.address}</span>}
+                        </div>
+                      ))}
+                      {itemCustomerResults.length === 0 && <div className="suggest-item disabled">該当なし</div>}
+                    </div>
+                  )}
+                  <button type="button" className="btn sm customer-new-btn" onClick={() => {
+                    setShowNewCustomerInItemForm(true)
+                    setNewCustomerForm({ name: '', furigana: '', phone1: '', phone2: '', phone3: '', address: '', postal_code: '', memo: '' })
+                  }}>+ 新規顧客を登録</button>
+                </>
+              )}
             </div>
 
             <div className="field">
@@ -1507,6 +2107,109 @@ function AppMain({ session, onLogout }) {
               {stocktakeSearchQuery.length === 0 && (
                 <div className="stocktake-no-result">物品名やバーコード番号を入力してください</div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Customer Form Modal (New) ===== */}
+      {showCustomerForm && (
+        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setShowCustomerForm(false) }}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2>新規顧客登録</h2>
+              <button className="modal-close" onClick={() => setShowCustomerForm(false)}>✕</button>
+            </div>
+            <input ref={customerImageRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleCustomerAiAnalyze(e, customerForm, setCustomerForm, setCustomerAiAnalyzing)} style={{ display: 'none' }} />
+            <div className="field">
+              <button type="button" className="ai-analyze-btn" onClick={() => customerImageRef.current?.click()} disabled={customerAiAnalyzing}>
+                {customerAiAnalyzing ? '🤖 AI解析中...' : '📷 画像から入力'}
+              </button>
+            </div>
+            <div className="field">
+              <label>顧客名 *</label>
+              <input type="text" value={customerForm.name} onChange={e => setCustomerForm(f => ({ ...f, name: e.target.value }))} placeholder="顧客名（会社名 or 個人名）" />
+            </div>
+            <div className="field">
+              <label>フリガナ</label>
+              <input type="text" value={customerForm.furigana} onChange={e => setCustomerForm(f => ({ ...f, furigana: e.target.value }))} placeholder="カタカナ" />
+            </div>
+            <div className="field">
+              <label>連絡先1</label>
+              <input type="tel" value={customerForm.phone1} onChange={e => setCustomerForm(f => ({ ...f, phone1: e.target.value }))} placeholder="電話番号（携帯優先）" />
+            </div>
+            <div className="field">
+              <label>連絡先2</label>
+              <input type="tel" value={customerForm.phone2} onChange={e => setCustomerForm(f => ({ ...f, phone2: e.target.value }))} placeholder="電話番号2" />
+            </div>
+            <div className="field">
+              <label>連絡先3</label>
+              <input type="tel" value={customerForm.phone3} onChange={e => setCustomerForm(f => ({ ...f, phone3: e.target.value }))} placeholder="電話番号3（FAXなど）" />
+            </div>
+            <div className="field">
+              <label>郵便番号</label>
+              <input type="text" value={customerForm.postal_code} onChange={e => setCustomerForm(f => ({ ...f, postal_code: e.target.value }))} placeholder="123-4567" />
+            </div>
+            <div className="field">
+              <label>住所</label>
+              <input type="text" value={customerForm.address} onChange={e => setCustomerForm(f => ({ ...f, address: e.target.value }))} placeholder="都道府県から番地まで" />
+            </div>
+            <div className="field">
+              <label>メモ</label>
+              <textarea value={customerForm.memo} onChange={e => setCustomerForm(f => ({ ...f, memo: e.target.value }))} placeholder="自由記入" rows={2} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setShowCustomerForm(false)}>キャンセル</button>
+              <button className="btn primary" onClick={() => saveCustomer(customerForm)}>登録</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Customer Edit Modal ===== */}
+      {showCustomerEdit && editCustomer && (
+        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') { setShowCustomerEdit(false); setEditCustomer(null) } }}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2>顧客編集</h2>
+              <button className="modal-close" onClick={() => { setShowCustomerEdit(false); setEditCustomer(null) }}>✕</button>
+            </div>
+            <div className="field">
+              <label>顧客名 *</label>
+              <input type="text" value={customerForm.name} onChange={e => setCustomerForm(f => ({ ...f, name: e.target.value }))} placeholder="顧客名" />
+            </div>
+            <div className="field">
+              <label>フリガナ</label>
+              <input type="text" value={customerForm.furigana} onChange={e => setCustomerForm(f => ({ ...f, furigana: e.target.value }))} placeholder="カタカナ" />
+            </div>
+            <div className="field">
+              <label>連絡先1</label>
+              <input type="tel" value={customerForm.phone1} onChange={e => setCustomerForm(f => ({ ...f, phone1: e.target.value }))} placeholder="電話番号" />
+            </div>
+            <div className="field">
+              <label>連絡先2</label>
+              <input type="tel" value={customerForm.phone2} onChange={e => setCustomerForm(f => ({ ...f, phone2: e.target.value }))} placeholder="電話番号2" />
+            </div>
+            <div className="field">
+              <label>連絡先3</label>
+              <input type="tel" value={customerForm.phone3} onChange={e => setCustomerForm(f => ({ ...f, phone3: e.target.value }))} placeholder="電話番号3" />
+            </div>
+            <div className="field">
+              <label>郵便番号</label>
+              <input type="text" value={customerForm.postal_code} onChange={e => setCustomerForm(f => ({ ...f, postal_code: e.target.value }))} placeholder="123-4567" />
+            </div>
+            <div className="field">
+              <label>住所</label>
+              <input type="text" value={customerForm.address} onChange={e => setCustomerForm(f => ({ ...f, address: e.target.value }))} placeholder="住所" />
+            </div>
+            <div className="field">
+              <label>メモ</label>
+              <textarea value={customerForm.memo} onChange={e => setCustomerForm(f => ({ ...f, memo: e.target.value }))} placeholder="自由記入" rows={2} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn danger" onClick={() => deleteCustomer(editCustomer)}>削除</button>
+              <button className="btn" onClick={() => { setShowCustomerEdit(false); setEditCustomer(null) }}>キャンセル</button>
+              <button className="btn primary" onClick={updateCustomer}>更新</button>
             </div>
           </div>
         </div>
@@ -1632,6 +2335,167 @@ function AppMain({ session, onLogout }) {
                   {helpOpen[section.key] && (
                     <div className="help-section-body">{section.content}</div>
                   )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Job Form Modal ===== */}
+      {showJobForm && (
+        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setShowJobForm(false) }}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2>{editJob ? '案件を編集' : '新規案件'}</h2>
+              <button className="modal-close" onClick={() => setShowJobForm(false)}>✕</button>
+            </div>
+            <div className="field">
+              <label>案件名 *</label>
+              <input type="text" value={jobForm.title} onChange={e => setJobForm(f => ({ ...f, title: e.target.value }))} placeholder="例: エアコン修理 / 冷蔵庫 出張点検" />
+            </div>
+            <div className="field">
+              <label>ステータス</label>
+              <select value={jobForm.status} onChange={e => setJobForm(f => ({ ...f, status: e.target.value }))}>
+                {JOB_STATUSES.map(s => <option key={s} value={s}>{JOB_STATUS_LABELS[s]}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ position: 'relative' }}>
+              <label>顧客</label>
+              {jobForm.customer_id ? (
+                <div className="selected-customer">
+                  <span className="selected-customer-name">{jobForm.customer_name || customers.find(c => c.id === jobForm.customer_id)?.name || '顧客'}</span>
+                  <button type="button" className="selected-customer-clear" onClick={() => setJobForm(f => ({ ...f, customer_id: null, customer_name: '' }))}>✕</button>
+                </div>
+              ) : (
+                <>
+                  <input type="text" value={jobCustomerSearch} onChange={e => { setJobCustomerSearch(e.target.value); setShowJobCustDropdown(true) }} onFocus={() => setShowJobCustDropdown(true)} placeholder="顧客を検索（名前・電話）" autoComplete="off" />
+                  {showJobCustDropdown && jobCustomerSearch.length >= 1 && (
+                    <div className="suggest-box customer-suggest">
+                      {jobCustomerResults.map(c => (
+                        <div key={c.id} className="suggest-item" onMouseDown={() => { setJobForm(f => ({ ...f, customer_id: c.id, customer_name: c.name || '' })); setJobCustomerSearch(''); setShowJobCustDropdown(false) }}>
+                          <span className="suggest-customer-name">{c.name}</span>
+                          {c.phone1 && <span className="suggest-customer-sub">{c.phone1}</span>}
+                        </div>
+                      ))}
+                      {jobCustomerResults.length === 0 && <div className="suggest-item disabled">該当なし（顧客タブで登録できます）</div>}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="field-row">
+              <div className="field"><label>メーカー</label><input type="text" value={jobForm.maker} onChange={e => setJobForm(f => ({ ...f, maker: e.target.value }))} placeholder="日立 など" /></div>
+              <div className="field"><label>型番</label><input type="text" value={jobForm.model_number} onChange={e => setJobForm(f => ({ ...f, model_number: e.target.value }))} /></div>
+            </div>
+            <div className="field">
+              <label>製品名</label>
+              <input type="text" value={jobForm.product_name} onChange={e => setJobForm(f => ({ ...f, product_name: e.target.value }))} placeholder="エアコン / 冷蔵庫 など" />
+            </div>
+            <div className="field">
+              <label>症状・依頼内容</label>
+              <textarea value={jobForm.failure_detail} onChange={e => setJobForm(f => ({ ...f, failure_detail: e.target.value }))} rows={2} />
+            </div>
+            <div className="field-row">
+              <div className="field"><label>訪問予定</label><input type="datetime-local" value={jobForm.scheduled_at} onChange={e => setJobForm(f => ({ ...f, scheduled_at: e.target.value }))} /></div>
+              <div className="field"><label>次回訪問</label><input type="datetime-local" value={jobForm.next_visit_at} onChange={e => setJobForm(f => ({ ...f, next_visit_at: e.target.value }))} /></div>
+            </div>
+            <div className="field-row">
+              <div className="field"><label>保証期限</label><input type="date" value={jobForm.warranty_end_date} onChange={e => setJobForm(f => ({ ...f, warranty_end_date: e.target.value }))} /></div>
+              <div className="field"><label>金額（円）</label><input type="number" value={jobForm.amount_yen} onChange={e => setJobForm(f => ({ ...f, amount_yen: e.target.value }))} min="0" placeholder="未定" /></div>
+            </div>
+            <div className="field">
+              <label>メモ</label>
+              <textarea value={jobForm.notes} onChange={e => setJobForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
+            </div>
+
+            {editJob ? (
+              <div className="field">
+                <label>使用部品（在庫から引当）</label>
+                {jobParts.length > 0 && (
+                  <div className="job-parts-list">
+                    {jobParts.map(p => (
+                      <div key={p.id} className="job-part-row">
+                        <span className="job-part-name">{p.name || '(名称なし)'}</span>
+                        <input className="job-part-qty" type="number" min="1" value={p.qty} onChange={e => updateJobPartQty(p, e.target.value)} />
+                        <span className="job-part-price">¥{((p.unit_price || 0) * (p.qty || 1)).toLocaleString()}</span>
+                        <button type="button" className="del-x" onClick={() => removeJobPart(p.id)}>×</button>
+                      </div>
+                    ))}
+                    <div className="job-parts-total">
+                      <span>部品小計</span>
+                      <span>¥{jobPartsTotal.toLocaleString()}</span>
+                      <button type="button" className="btn sm" onClick={() => setJobForm(f => ({ ...f, amount_yen: String(jobPartsTotal) }))}>金額に反映</button>
+                    </div>
+                  </div>
+                )}
+                <div style={{ position: 'relative' }}>
+                  <input type="text" value={jobPartSearch} onChange={e => { setJobPartSearch(e.target.value); setShowJobPartDropdown(true) }} onFocus={() => setShowJobPartDropdown(true)} placeholder="物品名・バーコードで検索して追加" autoComplete="off" />
+                  {showJobPartDropdown && jobPartSearch.length >= 1 && (
+                    <div className="suggest-box">
+                      {jobPartResults.map(i => (
+                        <div key={i.id} className="suggest-item" onMouseDown={() => addJobPart(i)}>
+                          <span className="suggest-customer-name">{i.name || '(名前なし)'}</span>
+                          <span className="suggest-customer-sub">¥{(i.price || 0).toLocaleString()}{i.loc ? ' / ' + i.loc : ''}</span>
+                        </div>
+                      ))}
+                      {jobPartResults.length === 0 && <div className="suggest-item disabled">該当なし</div>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="hint">使用部品は、案件を登録した後に追加できます。</p>
+            )}
+
+            <div className="modal-actions">
+              {editJob && <button className="btn danger" onClick={() => deleteJob(editJob)}>削除</button>}
+              <button className="btn" onClick={() => setShowJobForm(false)}>キャンセル</button>
+              <button className="btn primary" onClick={saveJob}>{editJob ? '更新' : '登録'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Trash Modal ===== */}
+      {showTrash && (
+        <div className="modal-bg" onClick={e => { if (e.target.className === 'modal-bg') setShowTrash(false) }}>
+          <div className="modal">
+            <div className="modal-header">
+              <h2>🗑️ ゴミ箱</h2>
+              <button className="modal-close" onClick={() => setShowTrash(false)}>✕</button>
+            </div>
+            <p className="hint">削除した物品は30日後に自動で完全削除されます。それまでは復元できます。</p>
+            {trashItems.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                <button className="btn sm danger" onClick={emptyTrash}>ゴミ箱を空にする</button>
+              </div>
+            )}
+            <div className="stocktake-list">
+              {trashItems.length === 0 ? (
+                <div className="stocktake-done">ゴミ箱は空です</div>
+              ) : trashItems.map(item => (
+                <div key={item.id} className="stocktake-item">
+                  <div className="stocktake-item-left">
+                    {item.image_url ? (
+                      <img src={item.image_url} alt="" className="item-thumb"
+                        onClick={(e) => openViewer(item.image_url, e)}
+                        onError={e => { e.target.style.display = 'none' }} />
+                    ) : (
+                      <div className="item-thumb-empty">📦</div>
+                    )}
+                    <div className="stocktake-item-info">
+                      <div className="stocktake-item-name">{item.name || '(名前なし)'}</div>
+                      <div className="stocktake-item-sub">
+                        {item.loc && <span className="loc-pill">{item.loc}</span>}
+                        {item.deleted_at && <span className="mono">{new Date(item.deleted_at).toLocaleDateString('ja-JP')} 削除</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn sm primary" onClick={() => restoreItem(item.id)}>復元</button>
+                    <button className="btn sm danger" onClick={() => purgeItem(item)}>完全削除</button>
+                  </div>
                 </div>
               ))}
             </div>

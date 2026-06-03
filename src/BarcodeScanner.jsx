@@ -23,7 +23,7 @@ export default function BarcodeScanner({ onScan, onClose, continuous = false }) 
       try {
         runningRef.current = false
         await scannerRef.current.stop()
-      } catch (e) {
+      } catch {
         // 既に停止済みの場合は無視
       }
     }

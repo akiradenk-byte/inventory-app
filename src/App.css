@@ -1701,3 +1701,290 @@ body {
   padding-left: 8px;
   border-left: 2px solid var(--separator);
 }
+
+/* ===== Customer Tab ===== */
+.customer-search-bar {
+  padding: 0 16px 8px;
+}
+
+.customer-actions-bar {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 12px;
+  flex-wrap: wrap;
+}
+
+.customer-list {
+  padding: 0 16px;
+}
+
+.customer-card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: background .15s;
+  border: .5px solid var(--border);
+}
+
+.customer-card:active {
+  background: var(--separator);
+}
+
+.customer-card-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.customer-card-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.customer-card-furigana {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.customer-card-details {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.customer-card-phone,
+.customer-card-address {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.customer-card-date {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+/* Customer selector in item form */
+.selected-customer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--primary-light);
+  border-radius: 8px;
+  border: 1px solid var(--primary);
+}
+
+.selected-customer-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--primary);
+  flex: 1;
+}
+
+.selected-customer-phone {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.selected-customer-clear {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.customer-suggest {
+  max-height: 200px;
+}
+
+.suggest-customer-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.suggest-customer-sub {
+  font-size: 12px;
+  color: var(--text3);
+  margin-left: 8px;
+}
+
+.suggest-item.disabled {
+  color: var(--text3);
+  cursor: default;
+}
+
+.customer-new-btn {
+  margin-top: 6px;
+  width: 100%;
+}
+
+/* Inline customer form in item form */
+.inline-customer-form {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+}
+
+.inline-customer-form input,
+.inline-customer-form textarea {
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  width: 100%;
+}
+
+.inline-customer-form textarea {
+  resize: vertical;
+}
+
+.inline-customer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.field-row.compact {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row.compact input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-analyze-btn.sm {
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+/* ===== 案件管理 (jobs) ===== */
+.job-status-filter {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.job-chip {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: .5px solid var(--border);
+  background: var(--card);
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.job-chip.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.job-card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.job-card:active { background: var(--separator); }
+.job-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.job-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-status-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.job-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text2);
+  margin-top: 2px;
+}
+.job-card-amount {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text);
+}
+.job-parts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.job-part-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.job-part-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-part-qty {
+  width: 56px;
+  text-align: center;
+}
+.job-part-price {
+  font-size: 13px;
+  color: var(--text2);
+  min-width: 64px;
+  text-align: right;
+}
+.job-parts-total {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+  font-weight: 600;
+  padding-top: 6px;
+  margin-top: 2px;
+  border-top: .5px solid var(--separator);
+}
