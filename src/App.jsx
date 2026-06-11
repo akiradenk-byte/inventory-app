@@ -119,14 +119,9 @@ const EMPTY_JOB = {
 }
 
 // ===== 共有アカウントによる自動ログイン =====
-// 第一経路: /api/login（認証情報はサーバ側の環境変数 SHARED_EMAIL / SHARED_PASSWORD のみで管理。
-//           クライアントのJSバンドルに秘密を含めないための経路）
-// 第二経路: 下記のクライアント埋め込み認証情報（移行期フォールバック）。
-//   ※ パスワードローテーション完了後は無効になる。その時点でこのフォールバックごと削除すること。
-const SHARED_EMAIL = import.meta.env.VITE_SHARED_EMAIL || 'shared@akiradenki.app'
-const SHARED_PASSWORD = import.meta.env.VITE_SHARED_PASSWORD || 'Akira-Kyoyu-2026-7xQ2tZ'
-
-// サーバ(/api/login)から共有アカウントのセッションを取得して適用する
+// 認証情報はサーバ側の環境変数 SHARED_EMAIL / SHARED_PASSWORD のみで管理し、
+// クライアントのJSバンドルには一切含めない。サーバ(/api/login)からセッションを取得して適用する。
+// （/api が動かないローカル開発では失敗し、手動ログイン画面にフォールバックする）
 async function autoLoginViaApi() {
   try {
     const resp = await fetch('/api/login', { method: 'POST' })
@@ -216,17 +211,10 @@ export default function App() {
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       if (!mounted) return
       if (s) { setSession(s); setAuthLoading(false); return }
-      // 第一経路: サーバ経由（成功時は onAuthStateChange が session をセットする）
+      // サーバ経由で自動ログイン（成功時は onAuthStateChange が session をセットする）
       const ok = await autoLoginViaApi()
-      if (!mounted || ok) return
-      // 第二経路: 移行期フォールバック（ローテーション後に削除）
-      if (SHARED_EMAIL && SHARED_PASSWORD) {
-        const { error } = await supabase.auth.signInWithPassword({ email: SHARED_EMAIL, password: SHARED_PASSWORD })
-        if (!mounted) return
-        if (error) { console.error('自動ログイン失敗:', error.message); setAuthLoading(false) }
-      } else {
-        setAuthLoading(false) // 共有アカウント未設定 → 手動ログイン画面（フォールバック）
-      }
+      if (!mounted) return
+      if (!ok) setAuthLoading(false) // 失敗時のみ手動ログイン画面にフォールバック
     }).catch(() => {
       if (mounted) setAuthLoading(false)
     })
