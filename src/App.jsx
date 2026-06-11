@@ -8,36 +8,16 @@ function LoginScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
-  const [isSignUp, setIsSignUp] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    setSuccess('')
     setLoading(true)
-
-    if (isSignUp) {
-      if (password.length < 6) {
-        setError('パスワードは6文字以上で入力してください')
-        setLoading(false)
-        return
-      }
-      const { error: signUpError } = await supabase.auth.signUp({ email, password })
-      setLoading(false)
-      if (signUpError) {
-        setError('登録に失敗しました: ' + signUpError.message)
-      } else {
-        setSuccess('確認メールを送信しました。メール内のリンクをクリックしてから、ログインしてください。')
-        setIsSignUp(false)
-      }
-    } else {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
-      setLoading(false)
-      if (authError) {
-        setError('ログインに失敗しました: ' + authError.message)
-      }
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    setLoading(false)
+    if (authError) {
+      setError('ログインに失敗しました: ' + authError.message)
     }
   }
 
@@ -46,7 +26,7 @@ function LoginScreen() {
       <div className="login-card">
         <img src="/icon-192.png" alt="在庫管理" className="login-logo" />
         <h1 className="login-title">在庫管理</h1>
-        <p className="login-subtitle">{isSignUp ? '新規アカウント登録' : 'ログインしてください'}</p>
+        <p className="login-subtitle">ログインしてください</p>
         <form onSubmit={handleSubmit} className="login-form">
           <div className="field">
             <label>メールアドレス</label>
@@ -65,20 +45,16 @@ function LoginScreen() {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder={isSignUp ? '6文字以上のパスワード' : 'パスワード'}
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
+              placeholder="パスワード"
+              autoComplete="current-password"
               required
             />
           </div>
           {error && <div className="login-error">{error}</div>}
-          {success && <div className="login-success">{success}</div>}
           <button type="submit" className="btn primary login-btn" disabled={loading}>
-            {loading ? '処理中...' : (isSignUp ? '新規登録' : 'ログイン')}
+            {loading ? '処理中...' : 'ログイン'}
           </button>
         </form>
-        <button className="login-switch" onClick={() => { setIsSignUp(!isSignUp); setError(''); setSuccess('') }}>
-          {isSignUp ? 'アカウントをお持ちの方はこちら' : '新規アカウント登録はこちら'}
-        </button>
       </div>
     </div>
   )
@@ -142,12 +118,30 @@ const EMPTY_JOB = {
   scheduled_at: '', next_visit_at: '', warranty_end_date: '', amount_yen: '', notes: '', case_number: '',
 }
 
-// 共有アカウントによる自動ログイン。優先順位: env → 既定値（フォールバック）。
-// 本番(Vercel)で env 未設定でも自動ログインできるよう既定値を持たせている。
-// ※ これは専用の低権限・共有アカウント。元々クライアントのJSバンドルに含まれる前提のもの。
-//    変更/ローテーション時は、ここ・Supabase Auth・(設定していれば)Vercelのenv を更新する。
+// ===== 共有アカウントによる自動ログイン =====
+// 第一経路: /api/login（認証情報はサーバ側の環境変数 SHARED_EMAIL / SHARED_PASSWORD のみで管理。
+//           クライアントのJSバンドルに秘密を含めないための経路）
+// 第二経路: 下記のクライアント埋め込み認証情報（移行期フォールバック）。
+//   ※ パスワードローテーション完了後は無効になる。その時点でこのフォールバックごと削除すること。
 const SHARED_EMAIL = import.meta.env.VITE_SHARED_EMAIL || 'shared@akiradenki.app'
 const SHARED_PASSWORD = import.meta.env.VITE_SHARED_PASSWORD || 'Akira-Kyoyu-2026-7xQ2tZ'
+
+// サーバ(/api/login)から共有アカウントのセッションを取得して適用する
+async function autoLoginViaApi() {
+  try {
+    const resp = await fetch('/api/login', { method: 'POST' })
+    if (!resp.ok) return false
+    const data = await resp.json()
+    if (!data.access_token || !data.refresh_token) return false
+    const { error } = await supabase.auth.setSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+    })
+    return !error
+  } catch {
+    return false
+  }
+}
 
 // CSVセル: ダブルクオート・カンマ・改行を含む値を安全に出力
 function csvCell(v) {
@@ -172,6 +166,16 @@ function parseCSV(text) {
   }
   if (cur !== '' || row.length) { row.push(cur); rows.push(row) }
   return rows
+}
+
+// timestamptz → datetime-local の入力値（ローカル時刻）。
+// UTCのISO文字列を slice で切り出すと9時間ズレて表示され、再保存のたびに時刻が past 方向へずれるため必ず変換する。
+function toLocalInputValue(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
+  const pad = n => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes())
 }
 
 // Storage上の画像をpublic URLから削除（孤児ファイル対策）
@@ -212,11 +216,14 @@ export default function App() {
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       if (!mounted) return
       if (s) { setSession(s); setAuthLoading(false); return }
+      // 第一経路: サーバ経由（成功時は onAuthStateChange が session をセットする）
+      const ok = await autoLoginViaApi()
+      if (!mounted || ok) return
+      // 第二経路: 移行期フォールバック（ローテーション後に削除）
       if (SHARED_EMAIL && SHARED_PASSWORD) {
         const { error } = await supabase.auth.signInWithPassword({ email: SHARED_EMAIL, password: SHARED_PASSWORD })
         if (!mounted) return
         if (error) { console.error('自動ログイン失敗:', error.message); setAuthLoading(false) }
-        // 成功時は onAuthStateChange が session をセットする
       } else {
         setAuthLoading(false) // 共有アカウント未設定 → 手動ログイン画面（フォールバック）
       }
@@ -788,8 +795,8 @@ function AppMain({ session }) {
       title: job.title || '', customer_id: job.customer_id || null, customer_name: job.customer_name || '',
       status: job.status || 'inquiry', maker: job.maker || '', model_number: job.model_number || '',
       product_name: job.product_name || '', failure_detail: job.failure_detail || '',
-      scheduled_at: job.scheduled_at ? job.scheduled_at.slice(0, 16) : '',
-      next_visit_at: job.next_visit_at ? job.next_visit_at.slice(0, 16) : '',
+      scheduled_at: toLocalInputValue(job.scheduled_at),
+      next_visit_at: toLocalInputValue(job.next_visit_at),
       warranty_end_date: job.warranty_end_date || '',
       amount_yen: job.amount_yen ?? '', notes: job.notes || '', case_number: job.case_number || '',
     })
@@ -2269,12 +2276,14 @@ function AppMain({ session }) {
                       <li><b>AI画像読み取り</b> — 写真から型番・価格などを自動入力</li>
                       <li><b>棚卸し</b> — スキャンや手動検索で在庫を確認</li>
                     </ul>
-                    <p style={{ marginTop: 12 }}><b>画面構成（4つのタブ）：</b></p>
+                    <p style={{ marginTop: 12 }}><b>画面構成（6つのタブ）：</b></p>
                     <ul>
                       <li>🏠 <b>ホーム</b> — 物品一覧・検索・フィルター</li>
                       <li>📷 <b>スキャン</b> — バーコードスキャンで新規登録</li>
+                      <li>👥 <b>顧客</b> — 顧客情報の登録・編集・CSV入出力</li>
+                      <li>🛠️ <b>案件</b> — 修理・出張案件の管理</li>
                       <li>📋 <b>棚卸し</b> — 棚卸しモードで在庫確認</li>
-                      <li>⚙️ <b>設定</b> — カテゴリ・保管場所の管理</li>
+                      <li>⚙️ <b>設定</b> — カテゴリ・保管場所・ゴミ箱・データ管理</li>
                     </ul>
                   </div>
                 )},
@@ -2329,15 +2338,15 @@ function AppMain({ session }) {
                     <li>スキャンできない場合は<b>「手動検索」</b>で物品名を検索して確認</li>
                     <li><b>未確認リスト</b>から直接チェックも可能</li>
                     <li><b>進捗バー</b>で確認状況をリアルタイムに確認</li>
-                    <li><b>「棚卸し終了」</b>で結果レポートを表示</li>
+                    <li><b>「終了」</b>ボタンで棚卸しモードを終了</li>
                   </ol>
                 )},
                 { key: 'settings', icon: '⚙️', title: '設定', content: (
                   <ul>
+                    <li><b>CSV出力</b> — 在庫データをCSVファイルでエクスポート</li>
+                    <li><b>ゴミ箱</b> — 削除した物品の確認・復元・完全削除</li>
                     <li><b>カテゴリ管理</b> — カテゴリの追加・削除</li>
                     <li><b>保管場所管理</b> — 保管場所の追加・削除・並べ替え</li>
-                    <li><b>CSV出力</b> — 在庫データをCSVファイルでエクスポート</li>
-                    <li><b>ログアウト</b> — アカウントからログアウト</li>
                   </ul>
                 )},
                 { key: 'faq', icon: '❓', title: 'よくある質問（FAQ）', content: (

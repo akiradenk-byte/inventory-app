@@ -9,11 +9,25 @@ function allowedOrigins() {
     .split(',').map(s => s.trim()).filter(Boolean)
 }
 
+// 既定許可: 自分のデプロイ先(*.vercel.app)とローカル開発のみ。
+// ALLOWED_ORIGINS 未設定でも本番(vercel.app)とローカルは動くが、任意オリジンは弾く。
+function isDefaultAllowed(origin) {
+  try {
+    const u = new URL(origin)
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true
+    return u.hostname === 'vercel.app' || u.hostname.endsWith('.vercel.app')
+  } catch {
+    return false
+  }
+}
+
 export function applyCors(req, res) {
   const origin = req.headers.origin || ''
   const list = allowedOrigins()
   if (list.length === 0) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*')
+    // 環境変数未設定時は任意オリジンへのエコーをやめ、自分のデプロイ先とローカルのみ許可。
+    // 本番URLを厳密に固定したい場合は ALLOWED_ORIGINS に設定する。
+    if (origin && isDefaultAllowed(origin)) res.setHeader('Access-Control-Allow-Origin', origin)
   } else if (origin && list.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin)
   } else if (list.includes('*')) {
