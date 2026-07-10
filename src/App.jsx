@@ -319,9 +319,6 @@ function AppMain({ session }) {
   const [showStocktakeSearch, setShowStocktakeSearch] = useState(false)
   const [stocktakeSearchQuery, setStocktakeSearchQuery] = useState('')
   const [scanHistory, setScanHistory] = useState([])
-  const [stocktakeScanning, setStocktakeScanning] = useState(false)
-  const [lastScanResult, setLastScanResult] = useState(null)
-  const lastScanTimerRef = useRef(null)
 
   // Customers
   const [customers, setCustomers] = useState([])
@@ -484,7 +481,7 @@ function AppMain({ session }) {
         return
       }
 
-      // scanTarget === 'form' （スキャンタブから）
+      // scanTarget === 'form' （新規登録フォームのバーコード欄から）
       const urlStr = (code || '').trim()
 
       try {
@@ -1143,7 +1140,6 @@ function AppMain({ session }) {
     setStocktakeLocFilter('')
     setStocktakeSearchQuery('')
     setShowStocktakeSearch(false)
-    setLastScanResult(null)
     setActiveTab('stocktake')
   }
 
@@ -1152,8 +1148,6 @@ function AppMain({ session }) {
     setStocktakeMode(false)
     setConfirmedIds(new Set())
     setScanHistory([])
-    setStocktakeScanning(false)
-    setLastScanResult(null)
     setActiveTab('home')
   }
 
@@ -1166,41 +1160,6 @@ function AppMain({ session }) {
     setScanHistory(prev => [item, ...prev.filter(h => h.id !== item.id)].slice(0, 5))
     if (navigator.vibrate) navigator.vibrate(200)
   }
-
-  const handleStocktakeScan = useCallback((code) => {
-    const codeLower = (code || '').toLowerCase()
-    // 完全一致を基本とし、部分一致は誤確認を防ぐため十分に長いコード同士のみ許可
-    const PARTIAL_MIN = 8
-    const matched = items.filter(i => {
-      if (!i.bc) return false
-      const bc = i.bc.toLowerCase()
-      if (bc === codeLower) return true
-      if (bc.length >= PARTIAL_MIN && codeLower.length >= PARTIAL_MIN) {
-        return bc.includes(codeLower) || codeLower.includes(bc)
-      }
-      return false
-    })
-
-    if (matched.length > 0) {
-      const first = matched[0]
-      const alreadyConfirmed = matched.every(i => confirmedIds.has(i.id))
-      if (alreadyConfirmed) {
-        if (navigator.vibrate) navigator.vibrate([300])
-        setLastScanResult({ ok: 'already', name: first.name })
-      } else {
-        matched.forEach(i => confirmItem(i.id))
-        setScanHistory(prev => [first, ...prev.filter(h => h.id !== first.id)].slice(0, 5))
-        if (navigator.vibrate) navigator.vibrate([100, 50, 100])
-        setLastScanResult({ ok: true, name: first.name, count: matched.length, image_url: first.image_url })
-      }
-    } else {
-      if (navigator.vibrate) navigator.vibrate([300])
-      setLastScanResult({ ok: false, code: code.length > 40 ? code.slice(0, 40) + '...' : code })
-    }
-
-    if (lastScanTimerRef.current) clearTimeout(lastScanTimerRef.current)
-    lastScanTimerRef.current = setTimeout(() => setLastScanResult(null), 3000)
-  }, [items, confirmedIds])
 
   const stocktakeSearchResults = stocktakeSearchQuery.length >= 1
     ? items.filter(i => {
@@ -1232,7 +1191,6 @@ function AppMain({ session }) {
         <div className="header-top">
           <div className="header-title">
             {activeTab === 'home' && '在庫管理'}
-            {activeTab === 'scan' && 'スキャン'}
             {activeTab === 'stocktake' && '棚卸し'}
             {activeTab === 'customers' && '顧客管理'}
             {activeTab === 'jobs' && '案件管理'}
@@ -1416,24 +1374,6 @@ function AppMain({ session }) {
           </>
         )}
 
-        {/* ===== SCAN TAB ===== */}
-        {activeTab === 'scan' && (
-          <div className="scan-tab-content">
-            <button className="scan-tab-btn" onClick={() => {
-              setScanTarget('form')
-              setForm({ bc: '', name: '', cat: categories[0] || '', loc: '', price: 0, note: '', image_url: '', condition: '' })
-              setAddPreset(null); setImageFile(null); setImagePreview(null)
-              setShowScanner(true)
-            }}>
-              📷
-            </button>
-            <div className="scan-tab-label">タップしてバーコードをスキャン</div>
-            <p style={{ fontSize: 13, color: 'var(--text3)', textAlign: 'center', maxWidth: 280 }}>
-              スキャンしたバーコードで新規物品を登録できます。日立部品URLにも対応しています。
-            </p>
-          </div>
-        )}
-
         {/* ===== STOCKTAKE TAB ===== */}
         {activeTab === 'stocktake' && (
           <>
@@ -1444,7 +1384,7 @@ function AppMain({ session }) {
                   <span className="quick-action-label" style={{ fontSize: 16 }}>棚卸し開始</span>
                 </button>
                 <p style={{ fontSize: 13, color: 'var(--text3)', textAlign: 'center', maxWidth: 280 }}>
-                  バーコードスキャンや手動検索で在庫を確認できます。
+                  手動検索や未確認リストのチェックで在庫を確認できます。
                 </p>
               </div>
             ) : (
@@ -1464,39 +1404,13 @@ function AppMain({ session }) {
 
                 {/* Action buttons */}
                 <div className="stocktake-actions">
-                  <button className="btn primary stocktake-scan-btn" onClick={() => setStocktakeScanning(true)}>📷 スキャン</button>
-                  <button className="btn stocktake-manual-btn" onClick={() => { setShowStocktakeSearch(true); setStocktakeSearchQuery('') }}>🔍 手動検索</button>
+                  <button className="btn primary stocktake-manual-btn" onClick={() => { setShowStocktakeSearch(true); setStocktakeSearchQuery('') }}>🔍 手動検索</button>
                 </div>
 
-                {/* Scan result toast */}
-                {lastScanResult && (
-                  <div className={'scan-toast' + (lastScanResult.ok ? ' ok' : ' ng')}>
-                    {lastScanResult.ok ? (
-                      <div className="scan-toast-inner">
-                        {lastScanResult.image_url && (
-                          <img src={lastScanResult.image_url} alt="" className="scan-toast-img"
-                            onClick={(e) => openViewer(lastScanResult.image_url, e)} />
-                        )}
-                        <div>
-                          <div className="scan-toast-title">✓ {lastScanResult.name}</div>
-                          <div className="scan-toast-sub">{lastScanResult.count}点を確認済みにしました</div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="scan-toast-inner">
-                        <div>
-                          <div className="scan-toast-title">✗ 該当なし</div>
-                          <div className="scan-toast-sub">{lastScanResult.code}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Scan history */}
+                {/* Confirm history */}
                 {scanHistory.length > 0 && (
                   <div className="scan-history">
-                    <div className="scan-history-title">スキャン履歴</div>
+                    <div className="scan-history-title">確認履歴</div>
                     <div className="scan-history-list">
                       {scanHistory.map((h, idx) => (
                         <div key={h.id + '-' + idx} className="scan-history-item">
@@ -1754,10 +1668,6 @@ function AppMain({ session }) {
           <span className="tab-icon">🏠</span>
           <span className="tab-label">ホーム</span>
         </button>
-        <button className={'tab-item' + (activeTab === 'scan' ? ' active' : '')} onClick={() => setActiveTab('scan')}>
-          <span className="tab-icon">📷</span>
-          <span className="tab-label">スキャン</span>
-        </button>
         <button className={'tab-item' + (activeTab === 'customers' ? ' active' : '')} onClick={() => setActiveTab('customers')}>
           <span className="tab-icon">👥</span>
           <span className="tab-label">顧客</span>
@@ -1785,33 +1695,6 @@ function AppMain({ session }) {
 
       {/* ===== Scanner Modal ===== */}
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />}
-
-      {/* ===== Stocktake Scanner (continuous) ===== */}
-      {stocktakeScanning && (
-        <>
-          <BarcodeScanner continuous={true} onScan={handleStocktakeScan} onClose={() => setStocktakeScanning(false)} />
-          <div className="stocktake-scanner-overlay">
-            {lastScanResult && (
-              <div className={'stocktake-scanner-toast' + (lastScanResult.ok === true ? ' ok' : lastScanResult.ok === 'already' ? ' already' : ' ng')}>
-                {lastScanResult.ok === true && <span>✓ {lastScanResult.name} 確認済！</span>}
-                {lastScanResult.ok === 'already' && <span>⚠ {lastScanResult.name} は確認済です</span>}
-                {lastScanResult.ok === false && <span>✗ 登録されていないバーコードです</span>}
-              </div>
-            )}
-            <div className="stocktake-scanner-bottom">
-              <div className="stocktake-scanner-counter">確認済: {confirmedIds.size} / {items.length} 件</div>
-              {scanHistory.length > 0 && (
-                <div className="stocktake-scanner-history">
-                  {scanHistory.slice(0, 5).map((h, i) => (
-                    <div key={h.id + '-' + i} className="stocktake-scanner-history-item">✓ {h.name}</div>
-                  ))}
-                </div>
-              )}
-              <button className="btn stocktake-scanner-done" onClick={() => setStocktakeScanning(false)}>スキャン完了</button>
-            </div>
-          </div>
-        </>
-      )}
 
       {/* ===== Image Viewer (Fullscreen) ===== */}
       {viewerImage && (
@@ -2255,14 +2138,13 @@ function AppMain({ session }) {
                     <p>このアプリでは以下のことができます：</p>
                     <ul>
                       <li><b>在庫管理</b> — 物品の登録・編集・削除・検索</li>
-                      <li><b>バーコードスキャン</b> — QRコード/バーコードで素早く登録・検索</li>
+                      <li><b>バーコードスキャン</b> — 新規登録フォームでコードを読み取って自動入力</li>
                       <li><b>AI画像読み取り</b> — 写真から型番・価格などを自動入力</li>
-                      <li><b>棚卸し</b> — スキャンや手動検索で在庫を確認</li>
+                      <li><b>棚卸し</b> — 手動検索や未確認リストで在庫を確認</li>
                     </ul>
-                    <p style={{ marginTop: 12 }}><b>画面構成（6つのタブ）：</b></p>
+                    <p style={{ marginTop: 12 }}><b>画面構成（5つのタブ）：</b></p>
                     <ul>
                       <li>🏠 <b>ホーム</b> — 物品一覧・検索・フィルター</li>
-                      <li>📷 <b>スキャン</b> — バーコードスキャンで新規登録</li>
                       <li>👥 <b>顧客</b> — 顧客情報の登録・編集・CSV入出力</li>
                       <li>🛠️ <b>案件</b> — 修理・出張案件の管理</li>
                       <li>📋 <b>棚卸し</b> — 棚卸しモードで在庫確認</li>
@@ -2272,8 +2154,8 @@ function AppMain({ session }) {
                 )},
                 { key: 'register', icon: '📝', title: '物品を登録する', content: (
                   <ol>
-                    <li><b>「+」ボタン</b>またはスキャンタブから新規登録フォームを開きます</li>
-                    <li><b>QRコード/バーコードスキャン</b> — スキャンタブでカメラアイコンをタップし、コードを読み取ると自動入力されます</li>
+                    <li><b>「+」ボタン</b>または「新規登録」ボタンから新規登録フォームを開きます</li>
+                    <li><b>QRコード/バーコードスキャン</b> — フォームのバーコード欄の📷をタップし、コードを読み取ると自動入力されます</li>
                     <li><b>AI画像読み取り</b> — 新規登録フォームで写真を撮影すると、AIが型番・部品名・価格などを自動で読み取ります</li>
                     <li><b>手動入力</b> — 物品名、カテゴリ、保管場所、単価、メモを手入力します</li>
                     <li><b>画像登録</b> — フォーム上部のカメラアイコンから物品の写真を撮影・添付できます</li>
@@ -2282,7 +2164,7 @@ function AppMain({ session }) {
                 { key: 'scan', icon: '📷', title: 'QRコードスキャン', content: (
                   <div>
                     <ol>
-                      <li>スキャンタブのカメラアイコンをタップ</li>
+                      <li>新規登録フォームのバーコード欄の📷をタップ</li>
                       <li>QRコード/バーコードにかざすと自動で読み取り</li>
                       <li>日立部品QRコードの場合は型番・部品名・価格が自動入力されます</li>
                     </ol>
@@ -2317,8 +2199,7 @@ function AppMain({ session }) {
                 { key: 'stocktake', icon: '📋', title: '棚卸し', content: (
                   <ol>
                     <li>棚卸しタブをタップして<b>棚卸しモードを開始</b></li>
-                    <li><b>「スキャンで確認」</b> → QRコードをスキャンして確認済みにする</li>
-                    <li>スキャンできない場合は<b>「手動検索」</b>で物品名を検索して確認</li>
+                    <li><b>「手動検索」</b>で物品名を検索して確認</li>
                     <li><b>未確認リスト</b>から直接チェックも可能</li>
                     <li><b>進捗バー</b>で確認状況をリアルタイムに確認</li>
                     <li><b>「終了」</b>ボタンで棚卸しモードを終了</li>
