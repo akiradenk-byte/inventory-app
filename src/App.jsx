@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useRef, Component } from 'react'
+import { useState, useEffect, useCallback, useRef, Component, lazy, Suspense } from 'react'
 import { supabase } from './supabase'
-import BarcodeScanner from './BarcodeScanner'
 import './App.css'
+
+// html5-qrcode が重いためスキャナーは使用時にのみ読み込む
+const BarcodeScanner = lazy(() => import('./BarcodeScanner'))
 
 // ===== ログイン画面 =====
 function LoginScreen() {
@@ -454,10 +456,12 @@ function AppMain({ session }) {
     return session?.access_token ? { Authorization: 'Bearer ' + session.access_token } : {}
   }
 
-  const fetchHitachiPartInfo = async (url) => {
+  const fetchHitachiPartInfo = useCallback(async (url) => {
     try {
       setFetchingPart(true)
-      const resp = await fetch('/api/fetch-part-info?url=' + encodeURIComponent(url), { headers: { ...(await authHeader()) } })
+      const { data: { session } } = await supabase.auth.getSession()
+      const headers = session?.access_token ? { Authorization: 'Bearer ' + session.access_token } : {}
+      const resp = await fetch('/api/fetch-part-info?url=' + encodeURIComponent(url), { headers })
       if (!resp.ok) { console.error('fetch-part-info error:', resp.status); return null }
       return await resp.json()
     } catch (err) {
@@ -466,7 +470,7 @@ function AppMain({ session }) {
     } finally {
       setFetchingPart(false)
     }
-  }
+  }, [])
 
   const handleScan = useCallback((code) => {
     try {
@@ -555,7 +559,7 @@ function AppMain({ session }) {
       setScanToast({ ok: false, msg: 'スキャンエラー: ' + (err.message || err) })
       setTimeout(() => setScanToast(null), 3000)
     }
-  }, [scanTarget, items, categories])
+  }, [scanTarget, items, categories, fetchHitachiPartInfo])
 
   const handleScanClose = () => {
     setShowScanner(false)
@@ -689,6 +693,14 @@ function AppMain({ session }) {
       note: (form.note || '').trim(),
       condition: form.condition || null,
       customer_id: itemCustomerId || null,
+    }
+    // バーコード重複の警告（新規登録時のみ）
+    if (!editItem && data.bc) {
+      const dup = items.filter(i => i.bc === data.bc)
+      if (dup.length > 0) {
+        const ok = confirm('同じバーコードの物品が既に ' + dup.length + ' 点登録されています（' + (dup[0].name || '名称なし') + '）。このまま登録しますか？')
+        if (!ok) { setIsSubmitting(false); return }
+      }
     }
     let savedId = null
     if (editItem) {
@@ -1314,6 +1326,8 @@ function AppMain({ session }) {
                         <img
                           src={firstItem.image_url}
                           alt=""
+                          loading="lazy"
+                          decoding="async"
                           className="item-thumb"
                           onClick={(e) => openViewer(firstItem.image_url, e)}
                           onError={e => { e.target.style.display = 'none' }}
@@ -1415,7 +1429,7 @@ function AppMain({ session }) {
                       {scanHistory.map((h, idx) => (
                         <div key={h.id + '-' + idx} className="scan-history-item">
                           {h.image_url && (
-                            <img src={h.image_url} alt="" className="scan-history-thumb"
+                            <img src={h.image_url} alt="" loading="lazy" decoding="async" className="scan-history-thumb"
                               onClick={(e) => openViewer(h.image_url, e)}
                               onError={e => { e.target.style.display = 'none' }} />
                           )}
@@ -1444,7 +1458,7 @@ function AppMain({ session }) {
                     <div key={item.id} className="stocktake-item">
                       <div className="stocktake-item-left">
                         {item.image_url ? (
-                          <img src={item.image_url} alt="" className="item-thumb"
+                          <img src={item.image_url} alt="" loading="lazy" decoding="async" className="item-thumb"
                             onClick={(e) => openViewer(item.image_url, e)}
                             onError={e => { e.target.style.display = 'none' }} />
                         ) : (
@@ -1694,7 +1708,11 @@ function AppMain({ session }) {
       )}
 
       {/* ===== Scanner Modal ===== */}
-      {showScanner && <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />}
+      {showScanner && (
+        <Suspense fallback={null}>
+          <BarcodeScanner onScan={handleScan} onClose={handleScanClose} />
+        </Suspense>
+      )}
 
       {/* ===== Image Viewer (Fullscreen) ===== */}
       {viewerImage && (
@@ -1989,7 +2007,7 @@ function AppMain({ session }) {
                 <div key={item.id} className={'stocktake-search-item' + (confirmedIds.has(item.id) ? ' confirmed' : '')}>
                   <div className="stocktake-item-left">
                     {item.image_url ? (
-                      <img src={item.image_url} alt="" className="item-thumb"
+                      <img src={item.image_url} alt="" loading="lazy" decoding="async" className="item-thumb"
                         onClick={(e) => openViewer(item.image_url, e)}
                         onError={e => { e.target.style.display = 'none' }} />
                     ) : (
@@ -2386,7 +2404,7 @@ function AppMain({ session }) {
                 <div key={item.id} className="stocktake-item">
                   <div className="stocktake-item-left">
                     {item.image_url ? (
-                      <img src={item.image_url} alt="" className="item-thumb"
+                      <img src={item.image_url} alt="" loading="lazy" decoding="async" className="item-thumb"
                         onClick={(e) => openViewer(item.image_url, e)}
                         onError={e => { e.target.style.display = 'none' }} />
                     ) : (
