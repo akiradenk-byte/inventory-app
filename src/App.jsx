@@ -1270,7 +1270,6 @@ function AppMain({ session }) {
                   onChange={e => { setSearch(e.target.value); setPage(0) }}
                 />
               </div>
-              <button className="search-scan-btn" onClick={() => openScanner('search')}>📷</button>
             </div>
             <div className="filter-row">
               <select className="filter-select" value={catFilter} onChange={e => { setCatFilter(e.target.value); setPage(0) }}>
@@ -1331,10 +1330,6 @@ function AppMain({ session }) {
               <button className="quick-action" onClick={openAdd}>
                 <span className="quick-action-icon">📦</span>
                 <span className="quick-action-label">新規登録</span>
-              </button>
-              <button className="quick-action" onClick={() => { setActiveTab('scan'); }}>
-                <span className="quick-action-icon">📷</span>
-                <span className="quick-action-label">スキャン登録</span>
               </button>
               <button className="quick-action" onClick={startStocktake}>
                 <span className="quick-action-icon">📋</span>
